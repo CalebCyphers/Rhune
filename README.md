@@ -1,3 +1,5 @@
 RHUNE is a dice roller bot!
 
-We are using [Chance](https://chancejs.com/) for rng and dice functions
+Components & Stack:
+- [Discord.js](https://discord.js.org/)
+- [Chance](https://chancejs.com/)
