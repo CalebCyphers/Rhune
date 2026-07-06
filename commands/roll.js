@@ -13,7 +13,7 @@ module.exports = {
 			.setRequired(false))
 		.addStringOption(option => option
 			.setName('mode')
-			.setDescription('For 2d6 rolls only: normal, adv, or dis')
+			.setDescription('Advantage/disadvantage: roll one extra die and drop lowest/highest (single die type only)')
 			.setRequired(false)
 			.addChoices(
 				{ name: 'normal', value: 'normal' },
@@ -36,7 +36,8 @@ module.exports = {
 				return;
 			}
 
-			const result = rollExpr(expr);
+			const modeOverride = mode === 'normal' ? null : mode;
+			const result = rollExpr(expr, modeOverride);
 			const embed = exprResultEmbed(result);
 			await interaction.reply({ embeds: [embed] });
 		}
