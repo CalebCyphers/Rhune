@@ -61,6 +61,29 @@ Key themes from that doc:
 
 ## Development Notes
 
+### Running locally
+
+1. Create a `.env` file (or export environment variables) with:
+   - `BOT_TOKEN`
+   - `CLIENT_ID`
+   - `BOT_STATUS`
+   - (optional) `GUILD_ID` — if set, commands deploy to that guild for faster iteration
+2. Install deps:
+
+```bash
+npm install
+```
+
+3. Run the bot:
+
+```bash
+npm run dev
+```
+
+On startup, the bot will auto-deploy slash commands.
+
+### Repo workflow
+
 - This repo uses feature branches + PRs (no direct commits to `main`).
 - Implementation will likely require a persistent store (SQLite is fine for v1), plus a rules indexing pipeline.
 

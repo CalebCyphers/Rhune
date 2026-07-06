@@ -1,62 +1,79 @@
 require('dotenv').config();
 
-const { REST, Routes } = require('discord.js')
+const { REST, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 const deployCommands = async () => {
-    try {
-        const allCommands = [];
+	try {
+		const allCommands = [];
 
-        const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
+		const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
 
-        for (const file of commandFiles) {
-            const command = require(`./commands/${file}`);
-            if ("data" in command && "execute" in command) {
-                allCommands.push(command.data.toJSON())
-            } else {
-                console.log(`WARNING: The command at ${file} is missing a required 'data' or 'execute' property.`, command.hasOwnProperty("data"), command.hasOwnProperty("execute"));
-            }
-        }
+		for (const file of commandFiles) {
+			const command = require(`./commands/${file}`);
+			if ('data' in command && 'execute' in command) {
+				allCommands.push(command.data.toJSON());
+			}
+			else {
+				console.log(
+					`WARNING: The command at ${file} is missing a required 'data' or 'execute' property.`,
+					Object.prototype.hasOwnProperty.call(command, 'data'),
+					Object.prototype.hasOwnProperty.call(command, 'execute'),
+				);
+			}
+		}
 
-        const rest = new REST().setToken(process.env.BOT_TOKEN)
+		const rest = new REST().setToken(process.env.BOT_TOKEN);
 
-        console.log(`Started refreshing ${allCommands.length} application slash commands globally`)
+		// Optional fast iteration path: deploy to a single guild if GUILD_ID is set.
+		// Otherwise, deploy globally (current behavior).
+		const guildId = process.env.GUILD_ID;
 
-        const data = await rest.put(
-            Routes.applicationCommands(process.env.CLIENT_ID),
-            { body: allCommands},
-        );
-
-        console.log('Successfully reloaded all commands!')
-    } catch (error) {
-        console.error('Error deploying commands:', error)
-    }
-}
+		if (guildId) {
+			console.log(`Started refreshing ${allCommands.length} application slash commands for guild ${guildId}`);
+			await rest.put(
+				Routes.applicationGuildCommands(process.env.CLIENT_ID, guildId),
+				{ body: allCommands },
+			);
+			console.log('Successfully reloaded all guild commands!');
+		}
+		else {
+			console.log(`Started refreshing ${allCommands.length} application slash commands globally`);
+			await rest.put(
+				Routes.applicationCommands(process.env.CLIENT_ID),
+				{ body: allCommands },
+			);
+			console.log('Successfully reloaded all global commands!');
+		}
+	}
+	catch (error) {
+		console.error('Error deploying commands:', error);
+	}
+};
 
 const {
-    Client,
-    GatewayIntentBits,
-    Partials,
-    Collection,
-    ActivityType,
-    PresenceUpdateStatus,
-    Events
+	Client,
+	GatewayIntentBits,
+	Partials,
+	Collection,
+	PresenceUpdateStatus,
+	Events,
 } = require('discord.js');
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
-    ],
-    partials: [
-        Partials.Channel,
-        Partials.Message,
-        Partials.User,
-        Partials.GuildMember
-    ]
+	intents: [
+		GatewayIntentBits.Guilds,
+		GatewayIntentBits.GuildMessages,
+		GatewayIntentBits.MessageContent,
+		GatewayIntentBits.GuildMembers,
+	],
+	partials: [
+		Partials.Channel,
+		Partials.Message,
+		Partials.User,
+		Partials.GuildMember,
+	],
 });
 
 client.commands = new Collection();
@@ -65,60 +82,63 @@ const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
 for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file)
-    const command = require(filePath);
+	const filePath = path.join(commandsPath, file);
+	const command = require(filePath);
 
-    if('data' in command && 'execute' in command) {
-        client.commands.set(command.data.name, command);
-    } else {
-        console.log(`The Command ${filePath} is missing a required "data" or "execute" property.`)
-    }
+	if ('data' in command && 'execute' in command) {
+		client.commands.set(command.data.name, command);
+	}
+	else {
+		console.log(`The Command ${filePath} is missing a required "data" or "execute" property.`);
+	}
 }
 
 client.once(Events.ClientReady, async () => {
-    console.log(`Ready! Logged in as ${client.user.tag}`)
+	console.log(`Ready! Logged in as ${client.user.tag}`);
 
-    // Deploy Commands
-    await deployCommands();
-    console.log(`Commands deployed globally`)
+	// Deploy Commands
+	await deployCommands();
+	console.log('Commands deployed globally');
 
-    const statusType = process.env.BOT_STATUS
+	const statusType = process.env.BOT_STATUS;
 
-    const statusMap = {
-        "online": PresenceUpdateStatus.Online,
-        "idle": PresenceUpdateStatus.Idle,
-        "dnd": PresenceUpdateStatus.DoNotDisturb,
-        "invisible": PresenceUpdateStatus.Invisible
-    }
+	const statusMap = {
+		'online': PresenceUpdateStatus.Online,
+		'idle': PresenceUpdateStatus.Idle,
+		'dnd': PresenceUpdateStatus.DoNotDisturb,
+		'invisible': PresenceUpdateStatus.Invisible,
+	};
 
-    client.user.setPresence({
-        status: statusMap[statusType]
-    })
+	client.user.setPresence({
+		status: statusMap[statusType],
+	});
 
-    console.log(`Bot status set to ${statusType}`)
-} )
-
-client.on(Events.InteractionCreate, async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = client.commands.get(interaction.commandName);
-
-    if (!command) {
-        console.error(`No command matching ${interaction.commandName} was found.`)
-        return
-    }
-    
-
-    try {
-        await command.execute(interaction)
-    } catch (error) {
-        console.error(error);
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({content: "There was an error while executing this command.", ephemeral:true});
-        } else {
-            await interaction.reply({content: "There was an error while executing this command.", ephemeral:true});
-        }
-    }
+	console.log(`Bot status set to ${statusType}`);
 });
 
-client.login(process.env.BOT_TOKEN)
+client.on(Events.InteractionCreate, async interaction => {
+	if (!interaction.isChatInputCommand()) return;
+
+	const command = client.commands.get(interaction.commandName);
+
+	if (!command) {
+		console.error(`No command matching ${interaction.commandName} was found.`);
+		return;
+	}
+
+
+	try {
+		await command.execute(interaction);
+	}
+	catch (error) {
+		console.error(error);
+		if (interaction.replied || interaction.deferred) {
+			await interaction.followUp({ content: 'There was an error while executing this command.', ephemeral:true });
+		}
+		else {
+			await interaction.reply({ content: 'There was an error while executing this command.', ephemeral:true });
+		}
+	}
+});
+
+client.login(process.env.BOT_TOKEN);
