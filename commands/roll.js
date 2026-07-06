@@ -1,7 +1,8 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 const { roll2d6, rollExpr } = require('../lib/dice');
-const { exprResultEmbed, twoD6Embed } = require('../lib/format');
+const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
+const { logRoll } = require('../lib/rolllog');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -31,14 +32,36 @@ module.exports = {
 			if (match2d6) {
 				const modifier = match2d6.groups?.mod ? Number.parseInt(match2d6.groups.mod, 10) : 0;
 				const result = roll2d6(mode);
-				const embed = twoD6Embed(result, modifier);
+
+				const rollId = logRoll({
+					guildId: interaction.guildId,
+					channelId: interaction.channelId,
+					userId: interaction.user.id,
+					commandName: 'roll',
+					expr: cleaned,
+					mode,
+					result: { ...result, modifier },
+				});
+
+				const embed = withRollId(twoD6Embed(result, modifier), rollId);
 				await interaction.reply({ embeds: [embed] });
 				return;
 			}
 
 			const modeOverride = mode === 'normal' ? null : mode;
 			const result = rollExpr(expr, modeOverride);
-			const embed = exprResultEmbed(result);
+
+			const rollId = logRoll({
+				guildId: interaction.guildId,
+				channelId: interaction.channelId,
+				userId: interaction.user.id,
+				commandName: 'roll',
+				expr,
+				mode: result.mode,
+				result,
+			});
+
+			const embed = withRollId(exprResultEmbed(result), rollId);
 			await interaction.reply({ embeds: [embed] });
 		}
 		catch (err) {
