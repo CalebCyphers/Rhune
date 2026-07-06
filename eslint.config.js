@@ -7,7 +7,7 @@ module.exports = [
 			ecmaVersion: 'latest',
 		},
 		rules: {
-            'arrow-spacing': ['warn', { before: true, after: true }],
+			'arrow-spacing': ['warn', { before: true, after: true }],
 			'brace-style': ['error', 'stroustrup', { allowSingleLine: true }],
 			'comma-dangle': ['error', 'always-multiline'],
 			'comma-spacing': 'error',
@@ -48,6 +48,6 @@ module.exports = [
 			'space-unary-ops': 'error',
 			'spaced-comment': 'error',
 			yoda: 'error',
-        },
+		},
 	},
 ];

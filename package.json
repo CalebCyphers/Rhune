@@ -4,8 +4,10 @@
   "description": "A basic dice roller bot for discord",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node index.js",
+    "lint": "eslint .",
+    "test": "node -e \"console.log('No tests yet. (Planned: Phase 1 dice engine unit tests)')\""
   },
   "keywords": [],
   "author": "Caleb Cyphers",
