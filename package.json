@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node index.js",
+    "deploy:commands": "node index.js --deploy-commands",
     "lint": "eslint .",
     "test": "node test/dice.test.js"
   },
