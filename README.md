@@ -83,7 +83,17 @@ If you spot any `Math.random()` usage or another RNG dependency, that's a bug—
 npm install
 ```
 
-3. Run the bot:
+3. (Optional) Deploy slash commands only:
+
+```bash
+# Fast dev iteration: set GUILD_ID to deploy commands to a single test server.
+npm run deploy:commands
+```
+
+- If `GUILD_ID` is set, commands deploy **to that guild only** (near-instant updates; recommended for development).
+- If `GUILD_ID` is not set, commands deploy **globally** (can take time to propagate).
+
+4. Run the bot:
 
 ```bash
 npm run dev
