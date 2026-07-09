@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "node index.js",
     "lint": "eslint .",
-    "test": "node -e \"console.log('No tests yet. (Planned: Phase 1 dice engine unit tests)')\""
+    "test": "node test/dice.test.js"
   },
   "keywords": [],
   "author": "Caleb Cyphers",

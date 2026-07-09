@@ -59,6 +59,15 @@ Key themes from that doc:
 - Async play emphasizes channel hygiene: rolls often happen in an **OOC channel**, with an option to post a short IC summary.
 - Rolls and state changes should be **auditable** (roll logs + change logs).
 
+## RNG / Dice engine
+
+All randomness in this bot uses the [`chance`](https://www.npmjs.com/package/chance) library:
+- `lib/dice.js` (all dice rolling)
+- `commands/coinflip.js`
+- `lib/id.js` (short roll ids)
+
+If you spot any `Math.random()` usage or another RNG dependency, that's a bug—please remove it and use Chance.
+
 ## Development Notes
 
 ### Running locally
