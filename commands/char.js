@@ -32,8 +32,8 @@ module.exports = {
 		.addSubcommand(sub => sub
 			.setName('rename')
 			.setDescription('Rename one of your characters')
-			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false))
-			.addStringOption(opt => opt.setName('new_name').setDescription('New character name').setRequired(true)))
+			.addStringOption(opt => opt.setName('new_name').setDescription('New character name').setRequired(true))
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false)))
 		.addSubcommand(sub => sub
 			.setName('delete')
 			.setDescription('Delete one of your characters')
