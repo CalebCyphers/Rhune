@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 
 const { roll2d6, rollExpr } = require('../lib/dice');
 const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
-const { getLastRoll, logRoll } = require('../lib/rolllog');
+const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -32,7 +32,7 @@ module.exports = {
 
 		try {
 			if (showLast) {
-				const last = getLastRoll({ guildId: interaction.guildId, userId: interaction.user.id });
+				const last = await getLastRoll({ guildId: interaction.guildId, userId: interaction.user.id });
 				if (!last) {
 					await interaction.reply({ content: 'No previous rolls found for you in this server yet.', ephemeral: true });
 					return;
@@ -58,7 +58,7 @@ module.exports = {
 				const modifier = match2d6.groups?.mod ? Number.parseInt(match2d6.groups.mod, 10) : 0;
 				const result = roll2d6(mode);
 
-				const rollId = logRoll({
+				const rollId = await logRoll({
 					guildId: interaction.guildId,
 					channelId: interaction.channelId,
 					userId: interaction.user.id,
@@ -76,7 +76,7 @@ module.exports = {
 			const modeOverride = mode === 'normal' ? null : mode;
 			const result = rollExpr(expr, modeOverride);
 
-			const rollId = logRoll({
+			const rollId = await logRoll({
 				guildId: interaction.guildId,
 				channelId: interaction.channelId,
 				userId: interaction.user.id,
