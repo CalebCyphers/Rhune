@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 
 const { getCharacterById, getActiveCharacterId } = require('../lib/characters_pb');
 const { listInventory, addInventoryItem, getInventoryItemById, updateInventoryItem, deleteInventoryItem } = require('../lib/inventory_pb');
+const { replyEphemeral, requireGuild } = require('../lib/interaction_helpers');
 
 async function resolveCharRecord(interaction) {
 	const idOpt = interaction.options.getString('id');
@@ -41,40 +42,37 @@ module.exports = {
 		const sub = interaction.options.getSubcommand();
 
 		try {
-			if (!interaction.guildId) {
-				await interaction.reply({ content: 'This command only works inside a server.', ephemeral: true });
-				return;
-			}
+			requireGuild(interaction);
 
 			if (sub === 'list') {
 				const record = await resolveCharRecord(interaction);
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/inv list`.', ephemeral: true });
+					await replyEphemeral(interaction, 'No active character set. Use `/char active id:<id>` or pass an id to `/inv list`.');
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, 'You do not own that character.');
 					return;
 				}
 
 				const items = await listInventory({ characterId: record.id });
 				if (!items.length) {
-					await interaction.reply({ content: `No inventory items for **${record.name}** yet.`, ephemeral: true });
+					await replyEphemeral(interaction, `No inventory items for **${record.name}** yet.`);
 					return;
 				}
 				const lines = items.map(it => `• ${it.qty ?? 1}× **${it.name}**${it.notes ? ` — ${it.notes}` : ''} (id: \`${it.id}\`)`);
-				await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+				await replyEphemeral(interaction, lines.join('\n'));
 				return;
 			}
 
 			if (sub === 'add') {
 				const record = await resolveCharRecord(interaction);
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/inv add`.', ephemeral: true });
+					await replyEphemeral(interaction, 'No active character set. Use `/char active id:<id>` or pass an id to `/inv add`.');
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, 'You do not own that character.');
 					return;
 				}
 
@@ -83,7 +81,7 @@ module.exports = {
 				const notes = interaction.options.getString('notes');
 
 				const item = await addInventoryItem({ characterId: record.id, name, qty, notes });
-				await interaction.reply({ content: `Added **${item.name}** (qty ${item.qty ?? qty}) to **${record.name}**. (item id: \`${item.id}\`)`, ephemeral: true });
+				await replyEphemeral(interaction, `Added **${item.name}** (qty ${item.qty ?? qty}) to **${record.name}**. (item id: \`${item.id}\`)`);
 				return;
 			}
 
@@ -96,23 +94,23 @@ module.exports = {
 				if (qty !== null) patch.qty = qty;
 				if (notes !== null) patch.notes = notes;
 				if (!Object.keys(patch).length) {
-					await interaction.reply({ content: 'Nothing to set. Provide qty and/or notes.', ephemeral: true });
+					await replyEphemeral(interaction, 'Nothing to set. Provide qty and/or notes.');
 					return;
 				}
 
 				const item = await getInventoryItemById({ id: itemId });
 				const character = await getCharacterById({ id: item.character_id });
 				if (character.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That item belongs to a character from a different server.', ephemeral: true });
+					await replyEphemeral(interaction, 'That item belongs to a character from a different server.');
 					return;
 				}
 				if (character.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own the character that item belongs to.', ephemeral: true });
+					await replyEphemeral(interaction, 'You do not own the character that item belongs to.');
 					return;
 				}
 
 				await updateInventoryItem({ id: itemId, patch });
-				await interaction.reply({ content: `Updated inventory item \`${itemId}\`.`, ephemeral: true });
+				await replyEphemeral(interaction, `Updated inventory item \`${itemId}\`.`);
 				return;
 			}
 
@@ -121,26 +119,26 @@ module.exports = {
 				const item = await getInventoryItemById({ id: itemId });
 				const character = await getCharacterById({ id: item.character_id });
 				if (character.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That item belongs to a character from a different server.', ephemeral: true });
+					await replyEphemeral(interaction, 'That item belongs to a character from a different server.');
 					return;
 				}
 				if (character.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own the character that item belongs to.', ephemeral: true });
+					await replyEphemeral(interaction, 'You do not own the character that item belongs to.');
 					return;
 				}
 
 				await deleteInventoryItem({ id: itemId });
-				await interaction.reply({ content: `Removed inventory item \`${itemId}\`.`, ephemeral: true });
+				await replyEphemeral(interaction, `Removed inventory item \`${itemId}\`.`);
 				return;
 			}
 
-			await interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
+			await replyEphemeral(interaction, 'Unknown subcommand.');
 		}
 		catch (err) {
 			const status = err?.status ? ` (status ${err.status})` : '';
 			const detail = err?.data ? `\n${JSON.stringify(err.data)}` : '';
 			const url = err?.url ? `\nurl: ${err.url}` : '';
-			await interaction.reply({ content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
+			await replyEphemeral(interaction, `Error${status}: ${err.message}${detail}${url}`);
 		}
 	},
 };

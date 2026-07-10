@@ -68,6 +68,7 @@ const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
+const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
 const client = new Client({
 	intents: [
@@ -144,17 +145,17 @@ client.on(Events.InteractionCreate, async interaction => {
 		try {
 			const pending = getPending(interaction.user.id);
 			if (!pending || pending.action !== parsed.action) {
-				await interaction.reply({ content: 'That selection has expired. Please re-run the command.', ephemeral: true });
+				await replyEphemeral(interaction, 'That selection has expired. Please re-run the command.');
 				return;
 			}
 
 			const record = await getCharacterById({ id: parsed.charId });
 			if (record.guild_id !== interaction.guildId) {
-				await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+				await replyEphemeral(interaction, 'That character is not from this server.');
 				return;
 			}
 			if (record.owner_user_id !== interaction.user.id) {
-				await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+				await replyEphemeral(interaction, 'You do not own that character.');
 				return;
 			}
 
@@ -169,12 +170,12 @@ client.on(Events.InteractionCreate, async interaction => {
 			clearPending(interaction.user.id);
 
 			if (result.type === 'text') {
-				await interaction.update({ content: result.content, components: [] });
+				await updateClearComponents(interaction, { content: result.content });
 				return;
 			}
 			if (result.type === 'record') {
 				const embed = await renderCharacterSheetEmbed(result.record);
-				await interaction.update({ content: 'Done.', embeds: [embed], components: [] });
+				await updateClearComponents(interaction, { content: 'Done.', embeds: [embed] });
 				return;
 			}
 
@@ -182,7 +183,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		}
 		catch (err) {
 			console.error(err);
-			await interaction.reply({ content: `Error: ${err.message}`, ephemeral: true });
+			await replyEphemeral(interaction, `Error: ${err.message}`);
 		}
 		return;
 	}

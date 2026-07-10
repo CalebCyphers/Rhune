@@ -15,7 +15,6 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
     "chance": "^1.1.13",
     "discord.js": "^14.26.4",
     "dotenv": "^17.4.2",
