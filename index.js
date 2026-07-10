@@ -96,10 +96,15 @@ for (const file of commandFiles) {
 	}
 }
 
+const { pbDiagnostics } = require('./lib/pb_diagnostics');
+
 client.once(Events.ClientReady, async () => {
 	console.log(`Ready! Logged in as ${client.user.tag}`);
 
 	const deployOnly = process.argv.includes('--deploy-commands');
+
+	// Optional PocketBase diagnostics (PB_DEBUG=1)
+	await pbDiagnostics();
 
 	// Deploy Commands
 	await deployCommands();

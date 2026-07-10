@@ -146,7 +146,8 @@ module.exports = {
 			// PocketBase client throws errors with status/data that are useful for debugging.
 			const status = err?.status ? ` (status ${err.status})` : '';
 			const detail = err?.data ? `\n${JSON.stringify(err.data)}` : '';
-			await interaction.reply({ content: `Error${status}: ${err.message}${detail}`, ephemeral: true });
+			const url = err?.url ? `\nurl: ${err.url}` : '';
+			await interaction.reply({ content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
 		}
 	},
 };
