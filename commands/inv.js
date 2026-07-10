@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 const { getCharacterById, getActiveCharacterId } = require('../lib/characters_pb');
-const { listInventory, addInventoryItem, updateInventoryItem, deleteInventoryItem } = require('../lib/inventory_pb');
+const { listInventory, addInventoryItem, getInventoryItemById, updateInventoryItem, deleteInventoryItem } = require('../lib/inventory_pb');
 
 async function resolveCharRecord(interaction) {
 	const idOpt = interaction.options.getString('id');
@@ -100,8 +100,17 @@ module.exports = {
 					return;
 				}
 
-				// NOTE: We don't currently verify ownership here because we don't have the character_id without fetching the item.
-				// For v1, keep collections admin-only and rely on bot usage; we can harden by fetching + checking owner later.
+				const item = await getInventoryItemById({ id: itemId });
+				const character = await getCharacterById({ id: item.character_id });
+				if (character.guild_id !== interaction.guildId) {
+					await interaction.reply({ content: 'That item belongs to a character from a different server.', ephemeral: true });
+					return;
+				}
+				if (character.owner_user_id !== interaction.user.id) {
+					await interaction.reply({ content: 'You do not own the character that item belongs to.', ephemeral: true });
+					return;
+				}
+
 				await updateInventoryItem({ id: itemId, patch });
 				await interaction.reply({ content: `Updated inventory item \`${itemId}\`.`, ephemeral: true });
 				return;
@@ -109,6 +118,17 @@ module.exports = {
 
 			if (sub === 'remove') {
 				const itemId = interaction.options.getString('item_id');
+				const item = await getInventoryItemById({ id: itemId });
+				const character = await getCharacterById({ id: item.character_id });
+				if (character.guild_id !== interaction.guildId) {
+					await interaction.reply({ content: 'That item belongs to a character from a different server.', ephemeral: true });
+					return;
+				}
+				if (character.owner_user_id !== interaction.user.id) {
+					await interaction.reply({ content: 'You do not own the character that item belongs to.', ephemeral: true });
+					return;
+				}
+
 				await deleteInventoryItem({ id: itemId });
 				await interaction.reply({ content: `Removed inventory item \`${itemId}\`.`, ephemeral: true });
 				return;
