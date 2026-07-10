@@ -1,7 +1,8 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 const { roll2d6, rollExpr } = require('../lib/dice');
-const { exprResultEmbed, twoD6Embed } = require('../lib/format');
+const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
+const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -19,26 +20,73 @@ module.exports = {
 				{ name: 'normal', value: 'normal' },
 				{ name: 'adv', value: 'adv' },
 				{ name: 'dis', value: 'dis' },
-			)),
+			))
+		.addBooleanOption(option => option
+			.setName('last')
+			.setDescription('Show your most recent roll (ignores other options)')
+			.setRequired(false)),
 	async execute(interaction) {
+		const showLast = interaction.options.getBoolean('last') || false;
 		const expr = interaction.options.getString('expr') || '2d6';
 		const mode = interaction.options.getString('mode') || 'normal';
 
 		try {
+			if (showLast) {
+				const last = await getLastRoll({ guildId: interaction.guildId, userId: interaction.user.id });
+				if (!last) {
+					await interaction.reply({ content: 'No previous rolls found for you in this server yet.', ephemeral: true });
+					return;
+				}
+
+				// Re-render the last result using our existing embed formatters.
+				let embed;
+				if (last.result?.type === '2d6') {
+					const modifier = last.result.modifier || 0;
+					embed = twoD6Embed(last.result, modifier);
+				}
+				else {
+					embed = exprResultEmbed(last.result);
+				}
+
+				await interaction.reply({ embeds: [withRollId(embed, last.id)] });
+				return;
+			}
 			// Special case: treat a bare 2d6 (with optional +/- modifier) as a PbtA-style roll.
 			const cleaned = String(expr).trim().toLowerCase().replace(/\s+/g, '');
 			const match2d6 = cleaned.match(/^2d6(?<mod>[+-]\d+)?$/);
 			if (match2d6) {
 				const modifier = match2d6.groups?.mod ? Number.parseInt(match2d6.groups.mod, 10) : 0;
 				const result = roll2d6(mode);
-				const embed = twoD6Embed(result, modifier);
+
+				const rollId = await logRoll({
+					guildId: interaction.guildId,
+					channelId: interaction.channelId,
+					userId: interaction.user.id,
+					commandName: 'roll',
+					expr: cleaned,
+					mode,
+					result: { ...result, modifier },
+				});
+
+				const embed = withRollId(twoD6Embed(result, modifier), rollId);
 				await interaction.reply({ embeds: [embed] });
 				return;
 			}
 
 			const modeOverride = mode === 'normal' ? null : mode;
 			const result = rollExpr(expr, modeOverride);
-			const embed = exprResultEmbed(result);
+
+			const rollId = await logRoll({
+				guildId: interaction.guildId,
+				channelId: interaction.channelId,
+				userId: interaction.user.id,
+				commandName: 'roll',
+				expr,
+				mode: result.mode,
+				result,
+			});
+
+			const embed = withRollId(exprResultEmbed(result), rollId);
 			await interaction.reply({ embeds: [embed] });
 		}
 		catch (err) {

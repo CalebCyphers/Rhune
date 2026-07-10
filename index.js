@@ -6,6 +6,8 @@ const path = require('path');
 
 const deployCommands = async () => {
 	try {
+		if (!process.env.BOT_TOKEN) throw new Error('BOT_TOKEN is required');
+		if (!process.env.CLIENT_ID) throw new Error('CLIENT_ID is required');
 		const allCommands = [];
 
 		const commandFiles = fs.readdirSync(path.join(__dirname, 'commands')).filter(file => file.endsWith('.js'));
@@ -49,6 +51,7 @@ const deployCommands = async () => {
 	}
 	catch (error) {
 		console.error('Error deploying commands:', error);
+		throw error;
 	}
 };
 
@@ -96,11 +99,19 @@ for (const file of commandFiles) {
 client.once(Events.ClientReady, async () => {
 	console.log(`Ready! Logged in as ${client.user.tag}`);
 
+	const deployOnly = process.argv.includes('--deploy-commands');
+
 	// Deploy Commands
 	await deployCommands();
-	console.log('Commands deployed globally');
 
-	const statusType = process.env.BOT_STATUS;
+	// In deploy-only mode, exit cleanly after registration.
+	if (deployOnly) {
+		console.log('Deploy-only run complete; exiting.');
+		await client.destroy();
+		process.exit(0);
+	}
+
+	const statusType = process.env.BOT_STATUS || 'online';
 
 	const statusMap = {
 		'online': PresenceUpdateStatus.Online,
@@ -109,9 +120,8 @@ client.once(Events.ClientReady, async () => {
 		'invisible': PresenceUpdateStatus.Invisible,
 	};
 
-	client.user.setPresence({
-		status: statusMap[statusType],
-	});
+	const mappedStatus = statusMap[statusType] || PresenceUpdateStatus.Online;
+	client.user.setPresence({ status: mappedStatus });
 
 	console.log(`Bot status set to ${statusType}`);
 });
