@@ -14,6 +14,8 @@ const {
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
+const { disambiguationMessage } = require('../lib/disambiguation');
+const { setPending } = require('../lib/pending_actions');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -152,8 +154,8 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					setPending(interaction.user.id, { action: 'rename', payload: { newName } });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'rename' }));
 					return;
 				}
 				if (record.kind === 'none') {
@@ -185,8 +187,8 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					setPending(interaction.user.id, { action: 'delete' });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'delete' }));
 					return;
 				}
 				if (record.kind === 'none') {
@@ -221,8 +223,8 @@ module.exports = {
 				const target = interaction.options.getString('target');
 				const res = await resolveCharacterTarget({ guildId: interaction.guildId, userId: interaction.user.id, target });
 				if (res.kind === 'ambiguous') {
-					const lines = res.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${res.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					setPending(interaction.user.id, { action: 'active' });
+					await interaction.reply(disambiguationMessage({ target: res.target, matches: res.matches, action: 'active' }));
 					return;
 				}
 				if (res.kind === 'none') {
@@ -268,8 +270,8 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					setPending(interaction.user.id, { action: 'sheet' });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'sheet' }));
 					return;
 				}
 				if (record.kind === 'none') {
@@ -304,8 +306,26 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					const patch = {};
+					const stats = {};
+					for (const key of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
+						const val = interaction.options.getInteger(key);
+						if (val !== null) stats[key] = val;
+					}
+					if (Object.keys(stats).length) patch.stats = stats;
+					const hp = interaction.options.getInteger('hp');
+					const hpMax = interaction.options.getInteger('hp_max');
+					const xp = interaction.options.getInteger('xp');
+					const loadCurrent = interaction.options.getInteger('load_current');
+					const loadMax = interaction.options.getInteger('load_max');
+					if (hp !== null) patch.hp = hp;
+					if (hpMax !== null) patch.hp_max = hpMax;
+					if (xp !== null) patch.xp = xp;
+					if (loadCurrent !== null) patch.load_current = loadCurrent;
+					if (loadMax !== null) patch.load_max = loadMax;
+
+					setPending(interaction.user.id, { action: 'set', payload: { patch } });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'set' }));
 					return;
 				}
 				if (record.kind === 'none') {
@@ -358,8 +378,13 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					const hp = interaction.options.getInteger('hp');
+					const hpMax = interaction.options.getInteger('hp_max');
+					const xp = interaction.options.getInteger('xp');
+					const loadCurrent = interaction.options.getInteger('load_current');
+					const loadMax = interaction.options.getInteger('load_max');
+					setPending(interaction.user.id, { action: 'mod', payload: { deltas: { hp, hp_max: hpMax, xp, load_current: loadCurrent, load_max: loadMax } } });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'mod' }));
 					return;
 				}
 				if (record.kind === 'none') {
@@ -400,8 +425,9 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					const name = interaction.options.getString('name');
+					setPending(interaction.user.id, { action: 'cond_add', payload: { name } });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'cond_add' }));
 					return;
 				}
 				if (record.kind === 'none') {
@@ -431,8 +457,9 @@ module.exports = {
 					return;
 				}
 				if (record.kind === 'ambiguous') {
-					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
-					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					const name = interaction.options.getString('name');
+					setPending(interaction.user.id, { action: 'cond_remove', payload: { name } });
+					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'cond_remove' }));
 					return;
 				}
 				if (record.kind === 'none') {
