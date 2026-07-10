@@ -243,7 +243,7 @@ module.exports = {
 					return;
 				}
 
-				await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: id });
+				await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: record.id });
 				await interaction.reply({ content: 'Set active character to **' + record.name + '** (`' + record.id + '`).', ephemeral: true });
 				return;
 			}
