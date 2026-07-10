@@ -107,7 +107,10 @@ function makeD20(face) {
 		ctx.lineTo(pts[b][0], pts[b][1]);
 		ctx.stroke();
 	}
-	line(0, 3); line(0, 7); line(5, 2); line(5, 8);
+	line(0, 3);
+	line(0, 7);
+	line(5, 2);
+	line(5, 8);
 
 	const txt = String(face);
 	const fontSize = face < 10 ? 56 : (face < 20 ? 52 : 50);
