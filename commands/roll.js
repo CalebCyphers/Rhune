@@ -1,8 +1,9 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 
 const { roll2d6, rollExpr } = require('../lib/dice');
 const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
 const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
+const { diceImagePath, diceImageName } = require('../lib/dice_images');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -31,6 +32,25 @@ module.exports = {
 		const mode = interaction.options.getString('mode') || 'normal';
 
 		try {
+			// Build a nice response wrapper so we can optionally attach dice images.
+			function buildReply({ embed, rollResult, rollId }) {
+				const files = [];
+
+				// For now: only show an icon for single-die results of d6 or d20.
+				// (Skip 2d6 PbtA rolls and multi-die expressions.)
+				if (rollResult?.type === 'expr' && rollResult.count === 1 && (rollResult.sides === 6 || rollResult.sides === 20)) {
+					const face = rollResult.rolls?.[0];
+					const filePath = diceImagePath({ sides: rollResult.sides, face });
+					const fileName = diceImageName({ sides: rollResult.sides, face });
+					if (filePath && fileName) {
+						files.push(new AttachmentBuilder(filePath, { name: fileName }));
+						embed.setThumbnail(`attachment://${fileName}`);
+					}
+				}
+
+				return { embeds: [withRollId(embed, rollId)], files };
+			}
+
 			if (showLast) {
 				const last = await getLastRoll({ guildId: interaction.guildId, userId: interaction.user.id });
 				if (!last) {
@@ -38,7 +58,6 @@ module.exports = {
 					return;
 				}
 
-				// Re-render the last result using our existing embed formatters.
 				let embed;
 				if (last.result?.type === '2d6') {
 					const modifier = last.result.modifier || 0;
@@ -48,9 +67,10 @@ module.exports = {
 					embed = exprResultEmbed(last.result);
 				}
 
-				await interaction.reply({ embeds: [withRollId(embed, last.id)] });
+				await interaction.reply(buildReply({ embed, rollResult: last.result, rollId: last.id }));
 				return;
 			}
+
 			// Special case: treat a bare 2d6 (with optional +/- modifier) as a PbtA-style roll.
 			const cleaned = String(expr).trim().toLowerCase().replace(/\s+/g, '');
 			const match2d6 = cleaned.match(/^2d6(?<mod>[+-]\d+)?$/);
@@ -68,8 +88,8 @@ module.exports = {
 					result: { ...result, modifier },
 				});
 
-				const embed = withRollId(twoD6Embed(result, modifier), rollId);
-				await interaction.reply({ embeds: [embed] });
+				const embed = twoD6Embed(result, modifier);
+				await interaction.reply(buildReply({ embed, rollResult: { ...result, modifier }, rollId }));
 				return;
 			}
 
@@ -86,8 +106,8 @@ module.exports = {
 				result,
 			});
 
-			const embed = withRollId(exprResultEmbed(result), rollId);
-			await interaction.reply({ embeds: [embed] });
+			const embed = exprResultEmbed(result);
+			await interaction.reply(buildReply({ embed, rollResult: result, rollId }));
 		}
 		catch (err) {
 			await interaction.reply({ content: `Could not roll: ${err.message}`, ephemeral: true });
