@@ -143,7 +143,10 @@ module.exports = {
 			await interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
 		}
 		catch (err) {
-			await interaction.reply({ content: `Error: ${err.message}`, ephemeral: true });
+			// PocketBase client throws errors with status/data that are useful for debugging.
+			const status = err?.status ? ` (status ${err.status})` : '';
+			const detail = err?.data ? `\n${JSON.stringify(err.data)}` : '';
+			await interaction.reply({ content: `Error${status}: ${err.message}${detail}`, ephemeral: true });
 		}
 	},
 };
