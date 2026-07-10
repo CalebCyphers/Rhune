@@ -68,6 +68,7 @@ const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
+const { renderPlaybookEmbed } = require('./lib/playbooks');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
 const client = new Client({
@@ -139,6 +140,26 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 	if (interaction.isButton()) {
+		// Playbook button: rhune:playbook:<charId>
+		if (interaction.customId.startsWith('rhune:playbook:')) {
+			try {
+				const charId = interaction.customId.slice('rhune:playbook:'.length);
+				const record = await getCharacterById({ id: charId });
+				const embed = renderPlaybookEmbed(record);
+				if (!embed) {
+					await replyEphemeral(interaction, 'No playbook info found for this character.');
+					return;
+				}
+				// Reply in the same ephemeral thread as the sheet.
+				await interaction.reply({ embeds: [embed], ephemeral: true });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
 		const parsed = parsePickCharCustomId(interaction.customId);
 		if (!parsed) return;
 

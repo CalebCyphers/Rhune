@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const {
 	createCharacter,
@@ -12,6 +12,7 @@ const {
 } = require('../lib/characters_pb');
 
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
+const { lookupPlaybook } = require('../lib/playbooks');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
 const { disambiguationMessage } = require('../lib/disambiguation');
@@ -295,7 +296,21 @@ module.exports = {
 				}
 
 				const embed = await renderCharacterSheetEmbed(record);
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+
+				// Add a Playbook button if the character has a playbook set.
+				const components = [];
+				if (record.playbook && lookupPlaybook(record.playbook)) {
+					const row = new ActionRowBuilder()
+						.addComponents(
+							new ButtonBuilder()
+								.setCustomId(`rhune:playbook:${record.id}`)
+								.setLabel('View Playbook')
+								.setStyle(ButtonStyle.Primary),
+						);
+					components.push(row);
+				}
+
+				await interaction.reply({ embeds: [embed], components, ephemeral: true });
 				return;
 			}
 
