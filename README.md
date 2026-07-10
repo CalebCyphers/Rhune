@@ -68,6 +68,90 @@ All randomness in this bot uses the [`chance`](https://www.npmjs.com/package/cha
 
 If you spot any `Math.random()` usage or another RNG dependency, that's a bug—please remove it and use Chance.
 
+## Slash Commands
+
+This bot currently ships these slash commands:
+
+### `/roll`
+Roll dice.
+
+**Options**
+- `expr` *(String)* — Dice expression (default: `2d6`). Examples: `d20`, `2d6+1`, `d8`
+- `mode` *(String)* — Roll mode. **Choices:** `normal`, `adv`, `dis`.
+  - `adv`/`dis` rolls one extra die and drops the lowest/highest (single die type only)
+- `last` *(Boolean)* — If enabled, shows your most recent roll in this server (ignores other options)
+
+**Examples**
+- `/roll`
+- `/roll expr:2d6+2`
+- `/roll expr:d20`
+- `/roll expr:d8 mode:adv`
+- `/roll last:true`
+
+### `/coinflip`
+Flip a coin.
+
+**Example**
+- `/coinflip`
+
+### `/char`
+Character management (per-server). Most subcommands operate on your **active character** by default.
+
+**Subcommands**
+- `/char create` — Create a character
+  - `name` *(String, required)* — Character name
+  - `playbook` *(String, optional)* — Playbook
+  - `set_active` *(Boolean, optional)* — If enabled, sets this character as your active character in this server
+- `/char list` — List characters
+  - `all` *(Boolean, optional)* — If enabled, lists all characters in the server (admin/debug)
+- `/char active` — Set your active character
+  - `target` *(String, required)* — Character name or record id
+- `/char sheet` — Show a character sheet
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+- `/char rename` — Rename a character
+  - `new_name` *(String, required)* — New character name
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+- `/char delete` — Delete a character
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+- `/char set` — Set absolute character values (owner only)
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+  - `hp`, `hp_max`, `xp`, `load_current`, `load_max` *(Integer, optional)*
+  - `str`, `dex`, `con`, `int`, `wis`, `cha` *(Integer, optional)*
+- `/char mod` — Modify character values by deltas (owner only)
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+  - `hp`, `hp_max`, `xp`, `load_current`, `load_max` *(Integer, optional)* — Deltas (+/-)
+- `/char condition add` — Add a condition
+  - `name` *(String, required)* — Condition name
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+- `/char condition remove` — Remove a condition
+  - `name` *(String, required)* — Condition name
+  - `target` *(String, optional)* — Character name or record id (defaults to active)
+
+**Notes**
+- Characters are scoped to a Discord server (guild).
+- You must own a character to view/modify it (current privacy model).
+
+### `/inv`
+Inventory management for your active character (or by character id).
+
+**Subcommands**
+- `/inv list` — List inventory items
+  - `id` *(String, optional)* — Character record id (defaults to active)
+- `/inv add` — Add an inventory item
+  - `name` *(String, required)* — Item name
+  - `id` *(String, optional)* — Character record id (defaults to active)
+  - `qty` *(Integer, optional)* — Quantity (default: 1)
+  - `notes` *(String, optional)* — Notes
+- `/inv set` — Update an inventory item (by inventory item id)
+  - `item_id` *(String, required)* — Inventory item record id
+  - `qty` *(Integer, optional)* — Quantity
+  - `notes` *(String, optional)* — Notes
+- `/inv remove` — Remove an inventory item (by inventory item id)
+  - `item_id` *(String, required)* — Inventory item record id
+
+**Notes**
+- Inventory items are stored as records; keep the `item_id` from `/inv list` output to edit/remove later.
+
 ## Development Notes
 
 ### Running locally
