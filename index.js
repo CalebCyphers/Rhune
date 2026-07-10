@@ -64,6 +64,11 @@ const {
 	Events,
 } = require('discord.js');
 
+const { parsePickCharCustomId } = require('./lib/disambiguation');
+const { getPending, clearPending } = require('./lib/pending_actions');
+const { getCharacterById } = require('./lib/characters_pb');
+const { renderCharacterSheetEmbed } = require('./lib/character_embed');
+
 const client = new Client({
 	intents: [
 		GatewayIntentBits.Guilds,
@@ -132,6 +137,56 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.InteractionCreate, async interaction => {
+	if (interaction.isButton()) {
+		const parsed = parsePickCharCustomId(interaction.customId);
+		if (!parsed) return;
+
+		try {
+			const pending = getPending(interaction.user.id);
+			if (!pending || pending.action !== parsed.action) {
+				await interaction.reply({ content: 'That selection has expired. Please re-run the command.', ephemeral: true });
+				return;
+			}
+
+			const record = await getCharacterById({ id: parsed.charId });
+			if (record.guild_id !== interaction.guildId) {
+				await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+				return;
+			}
+			if (record.owner_user_id !== interaction.user.id) {
+				await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+				return;
+			}
+
+			const { doCharAction } = require('./lib/char_ops');
+			const result = await doCharAction({
+				action: pending.action,
+				guildId: interaction.guildId,
+				userId: interaction.user.id,
+				charId: record.id,
+				payload: pending.payload,
+			});
+			clearPending(interaction.user.id);
+
+			if (result.type === 'text') {
+				await interaction.update({ content: result.content, components: [] });
+				return;
+			}
+			if (result.type === 'record') {
+				const embed = await renderCharacterSheetEmbed(result.record);
+				await interaction.update({ content: 'Done.', embeds: [embed], components: [] });
+				return;
+			}
+
+			await interaction.reply({ content: 'Unknown action.', ephemeral: true });
+		}
+		catch (err) {
+			console.error(err);
+			await interaction.reply({ content: `Error: ${err.message}`, ephemeral: true });
+		}
+		return;
+	}
+
 	if (!interaction.isChatInputCommand()) return;
 
 	const command = client.commands.get(interaction.commandName);
