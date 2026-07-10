@@ -22,8 +22,8 @@ module.exports = {
 		.addSubcommand(sub => sub
 			.setName('add')
 			.setDescription('Add an inventory item')
-			.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))
 			.addStringOption(opt => opt.setName('name').setDescription('Item name').setRequired(true))
+			.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))
 			.addIntegerOption(opt => opt.setName('qty').setDescription('Quantity (default 1)').setRequired(false))
 			.addStringOption(opt => opt.setName('notes').setDescription('Notes (optional)').setRequired(false)))
 		.addSubcommand(sub => sub

@@ -64,13 +64,13 @@ module.exports = {
 			.addSubcommand(sub => sub
 				.setName('add')
 				.setDescription('Add a condition')
-				.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))
-				.addStringOption(opt => opt.setName('name').setDescription('Condition name').setRequired(true)))
+				.addStringOption(opt => opt.setName('name').setDescription('Condition name').setRequired(true))
+				.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false)))
 			.addSubcommand(sub => sub
 				.setName('remove')
 				.setDescription('Remove a condition')
-				.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))
-				.addStringOption(opt => opt.setName('name').setDescription('Condition name').setRequired(true)))),
+				.addStringOption(opt => opt.setName('name').setDescription('Condition name').setRequired(true))
+				.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false)))),
 
 	async execute(interaction) {
 		const group = interaction.options.getSubcommandGroup(false);
