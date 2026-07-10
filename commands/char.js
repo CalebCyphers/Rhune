@@ -7,10 +7,13 @@ const {
 	setActiveCharacter,
 	getActiveCharacterId,
 	updateCharacter,
+	renameCharacter,
+	deleteCharacter,
 } = require('../lib/characters_pb');
 
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
+const { resolveCharacterTarget } = require('../lib/resolve_target');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -27,17 +30,26 @@ module.exports = {
 			.setDescription('List your characters in this server')
 			.addBooleanOption(opt => opt.setName('all').setDescription('List all characters in the server (admin/debug)').setRequired(false)))
 		.addSubcommand(sub => sub
+			.setName('rename')
+			.setDescription('Rename one of your characters')
+			.addStringOption(opt => opt.setName('new_name').setDescription('New character name').setRequired(true))
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false)))
+		.addSubcommand(sub => sub
+			.setName('delete')
+			.setDescription('Delete one of your characters')
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false)))
+		.addSubcommand(sub => sub
 			.setName('active')
-			.setDescription('Set your active character by id')
-			.addStringOption(opt => opt.setName('id').setDescription('Character record id').setRequired(true)))
+			.setDescription('Set your active character by name or id')
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id').setRequired(true)))
 		.addSubcommand(sub => sub
 			.setName('sheet')
-			.setDescription('Show a character sheet (by id, or your active character)')
-			.addStringOption(opt => opt.setName('id').setDescription('Character record id').setRequired(false)))
+			.setDescription('Show a character sheet (by name/id, or your active character)')
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id').setRequired(false)))
 		.addSubcommand(sub => sub
 			.setName('set')
 			.setDescription('Set absolute character values (owner only)')
-			.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false))
 			.addIntegerOption(opt => opt.setName('hp').setDescription('HP').setRequired(false))
 			.addIntegerOption(opt => opt.setName('hp_max').setDescription('HP max').setRequired(false))
 			.addIntegerOption(opt => opt.setName('xp').setDescription('XP').setRequired(false))
@@ -52,7 +64,7 @@ module.exports = {
 		.addSubcommand(sub => sub
 			.setName('mod')
 			.setDescription('Modify character values by deltas (owner only)')
-			.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))
+			.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false))
 			.addIntegerOption(opt => opt.setName('hp').setDescription('HP delta (+/-)').setRequired(false))
 			.addIntegerOption(opt => opt.setName('hp_max').setDescription('HP max delta (+/-)').setRequired(false))
 			.addIntegerOption(opt => opt.setName('xp').setDescription('XP delta (+/-)').setRequired(false))
@@ -65,12 +77,12 @@ module.exports = {
 				.setName('add')
 				.setDescription('Add a condition')
 				.addStringOption(opt => opt.setName('name').setDescription('Condition name').setRequired(true))
-				.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false)))
+				.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false)))
 			.addSubcommand(sub => sub
 				.setName('remove')
 				.setDescription('Remove a condition')
 				.addStringOption(opt => opt.setName('name').setDescription('Condition name').setRequired(true))
-				.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false)))),
+				.addStringOption(opt => opt.setName('target').setDescription('Character name or record id (defaults to active)').setRequired(false)))),
 
 	async execute(interaction) {
 		const group = interaction.options.getSubcommandGroup(false);
@@ -132,9 +144,96 @@ module.exports = {
 				return;
 			}
 
+			if (sub === 'rename') {
+				const newName = interaction.options.getString('new_name');
+				const record = await resolveCharRecord();
+				if (!record) {
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char rename`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					return;
+				}
+				if (record.guild_id !== interaction.guildId) {
+					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					return;
+				}
+
+				await renameCharacter({ id: record.id, newName });
+				await interaction.reply({ content: `Renamed character to **${newName}**.`, ephemeral: true });
+				return;
+			}
+
+			if (sub === 'delete') {
+				const record = await resolveCharRecord();
+				if (!record) {
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char delete`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					return;
+				}
+				if (record.guild_id !== interaction.guildId) {
+					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					return;
+				}
+
+				// If deleting the active character, clear the mapping first.
+				const activeId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
+				if (activeId === record.id) {
+					await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: null });
+				}
+
+				await deleteCharacter({ id: record.id });
+				await interaction.reply({ content: `Deleted character **${record.name}**.`, ephemeral: true });
+				return;
+			}
+
 			if (sub === 'active') {
-				const id = interaction.options.getString('id');
-				const record = await getCharacterById({ id });
+				const target = interaction.options.getString('target');
+				const res = await resolveCharacterTarget({ guildId: interaction.guildId, userId: interaction.user.id, target });
+				if (res.kind === 'ambiguous') {
+					const lines = res.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${res.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (res.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${res.target}**.`, ephemeral: true });
+					return;
+				}
+				if (res.kind !== 'ok') {
+					await interaction.reply({ content: 'Could not resolve character target.', ephemeral: true });
+					return;
+				}
+				const record = res.record;
 				if (record.guild_id !== interaction.guildId) {
 					await interaction.reply({ content: 'That character id is not from this server.', ephemeral: true });
 					return;
@@ -144,14 +243,19 @@ module.exports = {
 					return;
 				}
 
-				await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: id });
-				await interaction.reply({ content: 'Set active character to **' + record.name + '** (`' + record.id + '`)' + '.', ephemeral: true });
+				await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: record.id });
+				await interaction.reply({ content: 'Set active character to **' + record.name + '** (`' + record.id + '`).', ephemeral: true });
 				return;
 			}
 
 			async function resolveCharRecord() {
-				const idOpt = interaction.options.getString('id');
-				if (idOpt) return getCharacterById({ id: idOpt });
+				const target = interaction.options.getString('target');
+				if (target) {
+					const res = await resolveCharacterTarget({ guildId: interaction.guildId, userId: interaction.user.id, target });
+					if (res.kind === 'ok') return res.record;
+					// Pass through object for error handling.
+					return res;
+				}
 				const activeId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
 				if (!activeId) return null;
 				return getCharacterById({ id: activeId });
@@ -160,7 +264,20 @@ module.exports = {
 			if (sub === 'sheet') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/char sheet`.', ephemeral: true });
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char sheet`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
 
@@ -183,7 +300,20 @@ module.exports = {
 			if (sub === 'set') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/char set`.', ephemeral: true });
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char set`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.guild_id !== interaction.guildId) {
@@ -224,7 +354,20 @@ module.exports = {
 			if (sub === 'mod') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/char mod`.', ephemeral: true });
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char mod`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.guild_id !== interaction.guildId) {
@@ -253,7 +396,20 @@ module.exports = {
 			if (group === 'condition' && sub === 'add') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/char condition add`.', ephemeral: true });
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char condition add`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
@@ -271,7 +427,20 @@ module.exports = {
 			if (group === 'condition' && sub === 'remove') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active id:<id>` or pass an id to `/char condition remove`.', ephemeral: true });
+					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char condition remove`.', ephemeral: true });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					const lines = record.matches.slice(0, 10).map(c => `• **${c.name}**${c.playbook ? ` (${c.playbook})` : ''} — \`${c.id}\``);
+					await interaction.reply({ content: `Multiple characters match **${record.target}**. Re-run with an id:\n${lines.join('\n')}`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
