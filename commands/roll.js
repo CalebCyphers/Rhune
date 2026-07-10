@@ -4,6 +4,7 @@ const { roll2d6, rollExpr } = require('../lib/dice');
 const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
 const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
+const { renderPbtaD6Strip } = require('../lib/pbta_roll_strip');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -33,11 +34,19 @@ module.exports = {
 
 		try {
 			// Build a nice response wrapper so we can optionally attach dice images.
-			function buildReply({ embed, rollResult, rollId }) {
+			async function buildReply({ embed, rollResult, rollId }) {
 				const files = [];
 
-				// For now: only show an icon for single-die results of d6 or d20.
-				// (Skip 2d6 PbtA rolls and multi-die expressions.)
+				// PbtA: 2d6 (normal) or 3d6 keep 2 (adv/dis)
+				if (rollResult?.type === '2d6' && Array.isArray(rollResult.rolls)) {
+					const buf = await renderPbtaD6Strip({ rolls: rollResult.rolls, droppedIndex: rollResult.droppedIndex ?? null });
+					const fileName = 'pbta-roll.png';
+					files.push(new AttachmentBuilder(buf, { name: fileName }));
+					embed.setThumbnail(`attachment://${fileName}`);
+					return { embeds: [withRollId(embed, rollId)], files };
+				}
+
+				// Single die: show an icon for d6/d20.
 				if (rollResult?.type === 'expr' && rollResult.count === 1 && (rollResult.sides === 6 || rollResult.sides === 20)) {
 					const face = rollResult.rolls?.[0];
 					const filePath = diceImagePath({ sides: rollResult.sides, face });
@@ -67,7 +76,7 @@ module.exports = {
 					embed = exprResultEmbed(last.result);
 				}
 
-				await interaction.reply(buildReply({ embed, rollResult: last.result, rollId: last.id }));
+				await interaction.reply(await buildReply({ embed, rollResult: last.result, rollId: last.id }));
 				return;
 			}
 
@@ -89,7 +98,7 @@ module.exports = {
 				});
 
 				const embed = twoD6Embed(result, modifier);
-				await interaction.reply(buildReply({ embed, rollResult: { ...result, modifier }, rollId }));
+				await interaction.reply(await buildReply({ embed, rollResult: { ...result, modifier }, rollId }));
 				return;
 			}
 
@@ -107,7 +116,7 @@ module.exports = {
 			});
 
 			const embed = exprResultEmbed(result);
-			await interaction.reply(buildReply({ embed, rollResult: result, rollId }));
+			await interaction.reply(await buildReply({ embed, rollResult: result, rollId }));
 		}
 		catch (err) {
 			await interaction.reply({ content: `Could not roll: ${err.message}`, ephemeral: true });
