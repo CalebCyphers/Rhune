@@ -709,7 +709,16 @@ function buildWizardStep(interaction, step) {
 		}
 
 		const remaining = step.maxPicks - step.currentPicks;
-		const remainingText = remaining === 0 ? 'You have selected enough moves.' : `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+		let remainingText = remaining === 0 ? 'You have selected enough moves.' : `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+
+		// Check for overflow (Discord dropdown cap is 25)
+		const optionLimit = 25;
+		const overflow = Math.max(0, step.available.length - optionLimit);
+		const availableSlice = step.available.slice(0, optionLimit);
+		if (overflow > 0) {
+			remainingText += `\n\n_(${overflow} more moves available — browse with \`/move\` after creation.)_`;
+		}
+
 		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}`;
 
 		const embed = new EmbedBuilder()
@@ -735,16 +744,16 @@ function buildWizardStep(interaction, step) {
 			});
 		}
 
-		// Available moves as a dropdown (max 25 options fits in one row)
-		if (step.available.length > 0) {
+		// Available moves as a dropdown (max 25 options in Discord)
+		if (availableSlice.length > 0) {
 			const select = new StringSelectMenuBuilder()
 				.setCustomId('rhune:create:selectmove')
 				.setPlaceholder(remaining > 0 ? `Pick a move (${step.currentPicks}/${step.maxPicks} selected)` : 'All picks used')
 				.setDisabled(remaining === 0)
 				.setMinValues(1)
-				.setMaxValues(Math.min(remaining || 1, step.available.length));
+				.setMaxValues(Math.min(remaining || 1, availableSlice.length));
 
-			step.available.forEach(m => {
+			availableSlice.forEach(m => {
 				const isChosen = step.chosenMoves.includes(m.name);
 				select.addOptions(
 					new StringSelectMenuOptionBuilder()
