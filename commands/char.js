@@ -617,9 +617,10 @@ function buildWizardStep(interaction, step) {
 
 		const rows = [];
 
-		// Row 1: Pool values
+		// Row 1-2: Pool values (max 5 per row, split into 2 rows for the initial 6)
 		if (step.pool.length > 0) {
-			const poolRow = new ActionRowBuilder();
+			let poolRow = new ActionRowBuilder();
+			let count = 0;
 			step.pool.forEach(v => {
 				const isSelected = selected === v;
 				poolRow.addComponents(
@@ -628,8 +629,14 @@ function buildWizardStep(interaction, step) {
 						.setLabel(isSelected ? `▸ ${v}` : v)
 						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
 				);
+				count++;
+				if (count === 5) {
+					rows.push(poolRow);
+					poolRow = new ActionRowBuilder();
+					count = 0;
+				}
 			});
-			rows.push(poolRow);
+			if (poolRow.components.length > 0) rows.push(poolRow);
 		}
 
 		// Row 2-3: Stat buttons (3 per row in display order)
