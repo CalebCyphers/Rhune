@@ -202,9 +202,12 @@ client.on(Events.InteractionCreate, async interaction => {
 					}
 					break;
 				}
-				case 'selectpool':
-					selectPoolValue(wizardId, value);
+				case 'selectpool': {
+					const poolParts = interaction.customId.split(':');
+					const poolVal = poolParts.slice(4).join(':');
+					selectPoolValue(wizardId, poolVal);
 					break;
+				}
 				case 'assignstat':
 					assignStat(wizardId, value);
 					break;

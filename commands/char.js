@@ -621,11 +621,11 @@ function buildWizardStep(interaction, step) {
 		if (step.pool.length > 0) {
 			let poolRow = new ActionRowBuilder();
 			let count = 0;
-			step.pool.forEach(v => {
+			step.pool.forEach((v, pi) => {
 				const isSelected = selected === v;
 				poolRow.addComponents(
 					new ButtonBuilder()
-						.setCustomId(`rhune:create:selectpool:${v}`)
+						.setCustomId(`rhune:create:selectpool:${pi}:${v}`)
 						.setLabel(isSelected ? `▸ ${v}` : v)
 						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
 				);
