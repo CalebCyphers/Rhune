@@ -69,6 +69,8 @@ const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { renderPlaybookEmbed } = require('./lib/playbooks');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, toggleMove, getStepInfo, advanceStep } = require('./lib/create_wizard');
+const { createCharacter, setActiveCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
 const client = new Client({
@@ -152,6 +154,115 @@ client.on(Events.InteractionCreate, async interaction => {
 				}
 				// Reply in the same ephemeral thread as the sheet.
 				await interaction.reply({ embeds: [embed], ephemeral: true });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// === Creation wizard buttons ===
+		if (interaction.customId.startsWith('rhune:create:')) {
+			const wizardId = interaction.user.id;
+			const wizard = getWizard(wizardId);
+			if (!wizard) {
+				await replyEphemeral(interaction, 'No active character creation. Please start with /char create.');
+				return;
+			}
+
+			try {
+				const action = interaction.customId.replace('rhune:create:', '').split(':')[0];
+				const value = interaction.customId.split(':').slice(2).join(':');
+				const { buildWizardStep } = require('./commands/char');
+
+				switch (action) {
+				case 'pickpb':
+					selectPlaybook(wizardId, value);
+					break;
+				case 'pickbg':
+					selectBackground(wizardId, value);
+					break;
+				case 'pickinstinct':
+					selectInstinct(wizardId, value);
+					break;
+				case 'togglemove':
+					toggleMove(wizardId, value);
+					break;
+				case 'confirm':
+					advanceStep(wizardId);
+					break;
+				case 'finalize': {
+					const state = getWizard(wizardId);
+					if (!state) {
+						await replyEphemeral(interaction, 'Session expired. Please start again with /char create.');
+						return;
+					}
+
+					const allMoves = [
+						...state.grantedMoves,
+						...Object.keys(state.playbookData.startingMoves),
+						...Object.values(state.orChoices || {}).filter(Boolean),
+						...state.chosenMoves,
+					];
+
+					const choices = {
+						playbook: state.playbookKey,
+						background: state.background,
+						instinct: state.instinct,
+						chosen_moves: allMoves,
+					};
+
+					const record = await createCharacter({
+						guildId: state.guildId,
+						ownerUserId: state.userId,
+						name: state.name,
+						playbook: state.playbookKey,
+						stats: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
+						hp: null,
+						hpMax: null,
+						xp: 0,
+						loadCurrent: 0,
+						loadMax: 0,
+						choices,
+					});
+
+					await setActiveCharacter({ guildId: state.guildId, userId: state.userId, characterId: record.id });
+					clearWizard(wizardId);
+
+					const embed = await renderCharacterSheetEmbed(record);
+
+					// Add a Playbook button if the character has a playbook set.
+					const { lookupPlaybook: lp } = require('./lib/playbooks');
+					const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+					const components = [];
+					if (record.playbook && lp(record.playbook)) {
+						const row = new ActionRowBuilder()
+							.addComponents(
+								new ButtonBuilder()
+									.setCustomId(`rhune:playbook:${record.id}`)
+									.setLabel('View Playbook')
+									.setStyle(ButtonStyle.Primary),
+							);
+						components.push(row);
+					}
+
+					await interaction.update({ embeds: [embed], components, ephemeral: true });
+					return;
+				}
+				case 'cancel':
+					clearWizard(wizardId);
+					await interaction.update({
+						embeds: [new (require('discord.js').EmbedBuilder)().setDescription('Character creation cancelled.')],
+						components: [],
+						ephemeral: true,
+					});
+					return;
+				}
+
+				const step = getStepInfo(wizardId);
+				const result = buildWizardStep(interaction, step);
+				await interaction.update({ embeds: result.embeds, components: result.components, ephemeral: true });
 			}
 			catch (err) {
 				console.error(err);

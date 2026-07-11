@@ -1,7 +1,6 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 
 const {
-	createCharacter,
 	listCharacters,
 	getCharacterById,
 	setActiveCharacter,
@@ -13,6 +12,7 @@ const {
 
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
 const { lookupPlaybook } = require('../lib/playbooks');
+const { startWizard, getStepInfo, selectPlaybook } = require('../lib/create_wizard');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
 const { disambiguationMessage } = require('../lib/disambiguation');
@@ -100,27 +100,18 @@ module.exports = {
 			if (sub === 'create') {
 				const name = interaction.options.getString('name');
 				const playbook = interaction.options.getString('playbook');
-				const setActive = interaction.options.getBoolean('set_active') || false;
 
-				const record = await createCharacter({
-					guildId: interaction.guildId,
-					ownerUserId: interaction.user.id,
-					name,
-					playbook,
-					stats: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
-					hp: null,
-					hpMax: null,
-					xp: 0,
-					loadCurrent: 0,
-					loadMax: 0,
-				});
+				// Start wizard
+				startWizard({ userId: interaction.user.id, guildId: interaction.guildId, name });
 
-				if (setActive) {
-					await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: record.id });
+				if (playbook && lookupPlaybook(playbook)) {
+					// Playbook provided — select it and proceed to background step
+					selectPlaybook(interaction.user.id, playbook);
 				}
 
-				const embed = await renderCharacterSheetEmbed(record);
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+				const step = getStepInfo(interaction.user.id);
+				const { embeds, components } = buildWizardStep(interaction, step);
+				await interaction.reply({ embeds, components, ephemeral: true });
 				return;
 			}
 
@@ -507,4 +498,185 @@ module.exports = {
 			await interaction.reply({ content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
 		}
 	},
+
+	buildWizardStep,
 };
+
+// ===== Wizard UI builder (used by create handler and button handlers) =====
+
+const PLAYBOOK_ORDER = ['Blessed', 'Fox', 'Heavy', 'Judge', 'Lightbearer', 'Marshal', 'Ranger', 'Seeker', 'WouldbeHero'];
+
+function buildWizardStep(interaction, step) {
+	if (!step) {
+		return {
+			embeds: [new EmbedBuilder().setDescription('Something went wrong. Please start again with /char create.')],
+			components: [],
+		};
+	}
+
+	switch (step.type) {
+	case 'playbook_picker': {
+		const embed = new EmbedBuilder()
+			.setTitle('Create Character — Choose a Playbook')
+			.setDescription('Select a playbook to begin creating your character.');
+
+		// 5 + 4 buttons across 2 rows
+		const row1 = new ActionRowBuilder();
+		const row2 = new ActionRowBuilder();
+		PLAYBOOK_ORDER.forEach((key, i) => {
+			const pb = lookupPlaybook(key);
+			const btn = new ButtonBuilder()
+				.setCustomId(`rhune:create:pickpb:${key}`)
+				.setLabel(pb.name)
+				.setStyle(ButtonStyle.Secondary);
+			if (i < 5) row1.addComponents(btn);
+			else row2.addComponents(btn);
+		});
+
+		return { embeds: [embed], components: [row1, row2] };
+	}
+
+	case 'background_picker': {
+		const embed = new EmbedBuilder()
+			.setTitle('Choose Your Background')
+			.setDescription('Each background shapes your character\'s past and grants different moves.\n**Click a background to see its description.**');
+
+		const row = new ActionRowBuilder();
+		step.backgrounds.forEach(bg => {
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:pickbg:${bg.name}`)
+					.setLabel(bg.name.replace(/^The /, ''))
+					.setStyle(ButtonStyle.Secondary),
+			);
+		});
+
+		return { embeds: [embed], components: [row] };
+	}
+
+	case 'instinct_picker': {
+		const embed = new EmbedBuilder()
+			.setTitle('Choose Your Instinct')
+			.setDescription('Your instinct is what drives you. It colors how you approach every situation.\n**Click an instinct to see its description.**');
+
+		// instincts can fit 5 buttons in one row
+		const row = new ActionRowBuilder();
+		step.instincts.forEach(inst => {
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:pickinstinct:${inst.name}`)
+					.setLabel(inst.name)
+					.setStyle(ButtonStyle.Secondary),
+			);
+		});
+
+		return { embeds: [embed], components: [row] };
+	}
+
+	case 'moves_picker': {
+		const grantList = step.autoGranted.map(m => `• ${m}`).join('\n');
+
+		let orStatus = '';
+		if (step.orChoices) {
+			orStatus = '\n\n**Choose from these groups:**\n';
+			step.orChoices.forEach((group, i) => {
+				const chosen = step.orSelections[i];
+				orStatus += `\n${group.label}: `;
+				group.options.forEach(o => {
+					orStatus += chosen === o ? ` **✓ ${o}**` : ` ${o}`;
+				});
+			});
+		}
+
+		const remaining = step.maxPicks - step.currentPicks;
+		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the available moves below**`;
+
+		const embed = new EmbedBuilder()
+			.setTitle('Choose Your Starting Moves')
+			.setDescription(embedDesc);
+
+		const rows = [];
+		let currentRow = new ActionRowBuilder();
+		let btnCount = 0;
+
+		const allChoices = [];
+		if (step.orChoices) {
+			step.orChoices.forEach((group) => {
+				group.options.forEach(o => {
+					if (!allChoices.includes(o)) allChoices.push(o);
+				});
+			});
+		}
+		step.available.forEach(m => allChoices.push(m.name));
+
+		for (const moveName of allChoices) {
+			const isChosen = step.chosenMoves.includes(moveName) ||
+					Object.values(step.orSelections || {}).includes(moveName) ||
+					step.autoGranted.includes(moveName);
+			const btn = new ButtonBuilder()
+				.setCustomId(`rhune:create:togglemove:${moveName}`)
+				.setLabel(isChosen ? `✓ ${moveName}` : moveName)
+				.setStyle(isChosen ? ButtonStyle.Primary : ButtonStyle.Secondary);
+
+			if (btnCount >= 5) {
+				rows.push(currentRow);
+				currentRow = new ActionRowBuilder();
+				btnCount = 0;
+			}
+			currentRow.addComponents(btn);
+			btnCount++;
+		}
+		if (currentRow.components.length > 0) rows.push(currentRow);
+
+		// Confirm / cancel row
+		const actionRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:confirm')
+					.setLabel('Create Character')
+					.setStyle(ButtonStyle.Success)
+					.setDisabled(remaining > 0 || allChoices.length === 0),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+		rows.push(actionRow);
+
+		return { embeds: [embed], components: rows };
+	}
+
+	case 'confirm': {
+		const allMovesList = step.allMoves.map(m => `• ${m}`).join('\n');
+		const embed = new EmbedBuilder()
+			.setTitle('Confirm Character')
+			.setDescription(
+				`**Name:** ${step.name}\n` +
+					`**Playbook:** ${step.playbook}\n` +
+					`**Background:** ${step.background}\n` +
+					`**Instinct:** ${step.instinct}\n\n` +
+					`**Starting Moves:**\n${allMovesList}`,
+			);
+
+		const row = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:finalize')
+					.setLabel('Create & Set Active')
+					.setStyle(ButtonStyle.Success),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+
+		return { embeds: [embed], components: [row] };
+	}
+
+	default:
+		return {
+			embeds: [new EmbedBuilder().setDescription('Unknown step. Please start again with /char create.')],
+			components: [],
+		};
+	}
+}
