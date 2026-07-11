@@ -751,17 +751,19 @@ function buildWizardStep(interaction, step) {
 				.setPlaceholder(remaining > 0 ? `Pick a move (${step.currentPicks}/${step.maxPicks} selected)` : 'All picks used')
 				.setDisabled(remaining === 0)
 				.setMinValues(1)
-				.setMaxValues(Math.min(remaining || 1, availableSlice.length));
+				.setMaxValues(Math.min(remaining > 0 ? remaining : availableSlice.length, availableSlice.length));
 
 			availableSlice.forEach(m => {
 				const isChosen = step.chosenMoves.includes(m.name);
-				select.addOptions(
-					new StringSelectMenuOptionBuilder()
-						.setLabel(isChosen ? `✓ ${m.name}` : m.name)
-						.setValue(m.name)
-						.setDescription((m.text || '').substring(0, 100))
-						.setDefault(isChosen),
-				);
+				const opt = new StringSelectMenuOptionBuilder()
+					.setLabel(isChosen ? `✓ ${m.name}` : m.name)
+					.setValue(m.name)
+					.setDescription((m.text || '').substring(0, 100));
+				// Only set defaults when dropdown is active (prevents too-many-defaults error when disabled)
+				if (isChosen && remaining > 0) {
+					opt.setDefault(true);
+				}
+				select.addOptions(opt);
 			});
 
 			rows.push(new ActionRowBuilder().addComponents(select));
