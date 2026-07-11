@@ -518,9 +518,19 @@ function buildWizardStep(interaction, step) {
 	case 'playbook_picker': {
 		const embed = new EmbedBuilder()
 			.setTitle('Create Character — Choose a Playbook')
-			.setDescription('Select a playbook to begin creating your character.');
+			.setDescription('Each playbook has its own story and style. Read about them below, then pick one.');
 
-		// 5 + 4 buttons across 2 rows
+		PLAYBOOK_ORDER.forEach(key => {
+			const pb = lookupPlaybook(key);
+			const die = pb.creationRules?.die || 'd6';
+			const hp = pb.creationRules?.maxHP || '?';
+			embed.addFields({
+				name: pb.name,
+				value: `*${pb.tagline}*
+\`Damage ${die}  ·  Max HP ${hp}\``,
+			});
+		});
+
 		const row1 = new ActionRowBuilder();
 		const row2 = new ActionRowBuilder();
 		PLAYBOOK_ORDER.forEach((key, i) => {
