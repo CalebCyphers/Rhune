@@ -173,7 +173,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 			try {
 				const action = interaction.customId.replace('rhune:create:', '').split(':')[0];
-				const value = interaction.customId.split(':').slice(2).join(':');
+				const value = interaction.customId.split(':').slice(3).join(':');
 				const { buildWizardStep } = require('./commands/char');
 
 				switch (action) {
