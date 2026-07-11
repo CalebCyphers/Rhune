@@ -601,7 +601,14 @@ function buildWizardStep(interaction, step) {
 		const allAssigned = step.allAssigned;
 		const selected = step.selectedPoolValue;
 
-		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it.\nClick an assigned stat to return it to the pool.';
+		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it. Click an assigned stat to return it to the pool.\n\n' +
+	'`STR` — Strength — Clash, Defy Danger (might)\n' +
+	'`DEX` — Dexterity — Let Fly, Defy Danger (agility)\n' +
+	'`CON` — Constitution — Defend, Defy Danger (hold steady)\n' +
+	'`INT` — Intelligence — Know Things, Defy Danger (expertise)\n' +
+	'`WIS` — Wisdom — Seek Insight, Defy Danger (senses/will)\n' +
+	'`CHA` — Charisma — Persuade, Defy Danger (socially)\n\n' +
+	'_Stats range from \u22121 to +3. When a move calls for a roll, look here._';
 
 		// Build a scoreboard string showing current assignments
 		const statNames = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
