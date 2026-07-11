@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 
 const {
 	listCharacters,
@@ -588,7 +588,7 @@ function buildWizardStep(interaction, step) {
 	}
 
 	case 'moves_picker': {
-		const grantList = step.autoGranted.map(m => `• ${m}`).join('\n');
+		const grantList = step.autoGranted.map(m => `• \`${m}\``).join('\n');
 
 		let orStatus = '';
 		if (step.orChoices) {
@@ -603,44 +603,54 @@ function buildWizardStep(interaction, step) {
 		}
 
 		const remaining = step.maxPicks - step.currentPicks;
-		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the available moves below**`;
+		const remainingText = remaining === 0 ? 'You have selected enough moves.' : `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}`;
 
 		const embed = new EmbedBuilder()
 			.setTitle('Choose Your Starting Moves')
 			.setDescription(embedDesc);
 
 		const rows = [];
-		let currentRow = new ActionRowBuilder();
-		let btnCount = 0;
 
-		const allChoices = [];
+		// OR-group picker buttons (if any)
 		if (step.orChoices) {
-			step.orChoices.forEach((group) => {
+			step.orChoices.forEach((group, gi) => {
+				const grpRow = new ActionRowBuilder();
 				group.options.forEach(o => {
-					if (!allChoices.includes(o)) allChoices.push(o);
+					const isSelected = Object.values(step.orSelections || {}).includes(o);
+					grpRow.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:create:orchoice:${gi}:${o}`)
+							.setLabel(isSelected ? `✓ ${o}` : o)
+							.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
+					);
 				});
+				if (grpRow.components.length > 0) rows.push(grpRow);
 			});
 		}
-		step.available.forEach(m => allChoices.push(m.name));
 
-		for (const moveName of allChoices) {
-			const isChosen = step.chosenMoves.includes(moveName) ||
-					Object.values(step.orSelections || {}).includes(moveName) ||
-					step.autoGranted.includes(moveName);
-			const btn = new ButtonBuilder()
-				.setCustomId(`rhune:create:togglemove:${moveName}`)
-				.setLabel(isChosen ? `✓ ${moveName}` : moveName)
-				.setStyle(isChosen ? ButtonStyle.Primary : ButtonStyle.Secondary);
+		// Available moves as a dropdown (max 25 options fits in one row)
+		if (step.available.length > 0) {
+			const select = new StringSelectMenuBuilder()
+				.setCustomId('rhune:create:selectmove')
+				.setPlaceholder(remaining > 0 ? `Pick a move (${step.currentPicks}/${step.maxPicks} selected)` : 'All picks used')
+				.setDisabled(remaining === 0)
+				.setMinValues(1)
+				.setMaxValues(Math.min(remaining || 1, step.available.length));
 
-			if (btnCount >= 5) {
-				rows.push(currentRow);
-				currentRow = new ActionRowBuilder();
-				btnCount = 0;
-			}
-			currentRow.addComponents(btn);
-			btnCount++;
+			step.available.forEach(m => {
+				const isChosen = step.chosenMoves.includes(m.name);
+				select.addOptions(
+					new StringSelectMenuOptionBuilder()
+						.setLabel(isChosen ? `✓ ${m.name}` : m.name)
+						.setValue(m.name)
+						.setDescription((m.text || '').substring(0, 100))
+						.setDefault(isChosen),
+				);
+			});
+
+			rows.push(new ActionRowBuilder().addComponents(select));
 		}
-		if (currentRow.components.length > 0) rows.push(currentRow);
 
 		// Confirm / cancel row
 		const actionRow = new ActionRowBuilder()
@@ -649,7 +659,7 @@ function buildWizardStep(interaction, step) {
 					.setCustomId('rhune:create:confirm')
 					.setLabel('Create Character')
 					.setStyle(ButtonStyle.Success)
-					.setDisabled(remaining > 0 || allChoices.length === 0),
+					.setDisabled(remaining > 0),
 				new ButtonBuilder()
 					.setCustomId('rhune:create:cancel')
 					.setLabel('Cancel')

@@ -69,7 +69,7 @@ const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { renderPlaybookEmbed } = require('./lib/playbooks');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, toggleMove, getStepInfo, advanceStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, toggleMove, setOrChoice, getStepInfo, advanceStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
@@ -189,6 +189,19 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'togglemove':
 					toggleMove(wizardId, value);
 					break;
+				case 'orchoice': {
+					const parts = interaction.customId.split(':');
+					const groupIdx = parseInt(parts[3], 10);
+					const moveName = parts.slice(4).join(':');
+					const wiz = getWizard(wizardId);
+					if (wiz?.orChoices?.[groupIdx] === moveName) {
+						setOrChoice(wizardId, groupIdx, null);
+					}
+					else {
+						setOrChoice(wizardId, groupIdx, moveName);
+					}
+					break;
+				}
 				case 'confirm':
 					advanceStep(wizardId);
 					break;
@@ -247,7 +260,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						components.push(row);
 					}
 
-					await interaction.update({ embeds: [embed], components, ephemeral: true });
+					await interaction.update({ embeds: [embed], components, flags: 64 });
 					return;
 				}
 				case 'cancel':
@@ -255,14 +268,14 @@ client.on(Events.InteractionCreate, async interaction => {
 					await interaction.update({
 						embeds: [new (require('discord.js').EmbedBuilder)().setDescription('Character creation cancelled.')],
 						components: [],
-						ephemeral: true,
+						flags: 64,
 					});
 					return;
 				}
 
 				const step = getStepInfo(wizardId);
 				const result = buildWizardStep(interaction, step);
-				await interaction.update({ embeds: result.embeds, components: result.components, ephemeral: true });
+				await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });
 			}
 			catch (err) {
 				console.error(err);
@@ -312,6 +325,28 @@ client.on(Events.InteractionCreate, async interaction => {
 			}
 
 			await interaction.reply({ content: 'Unknown action.', ephemeral: true });
+		}
+		catch (err) {
+			console.error(err);
+			await replyEphemeral(interaction, `Error: ${err.message}`);
+		}
+		return;
+	}
+
+	// === Creation wizard select menus ===
+	if (interaction.isStringSelectMenu() && interaction.customId === 'rhune:create:selectmove') {
+		const wizardId = interaction.user.id;
+		const wizard = getWizard(wizardId);
+		if (!wizard) {
+			await replyEphemeral(interaction, 'No active character creation. Please start with /char create.');
+			return;
+		}
+		try {
+			wizard.chosenMoves = interaction.values;
+			const { buildWizardStep } = require('./commands/char');
+			const step = getStepInfo(wizardId);
+			const result = buildWizardStep(interaction, step);
+			await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });
 		}
 		catch (err) {
 			console.error(err);
