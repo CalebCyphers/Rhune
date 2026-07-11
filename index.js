@@ -69,7 +69,7 @@ const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { renderPlaybookEmbed } = require('./lib/playbooks');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, toggleMove, setOrChoice, getStepInfo, advanceStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
@@ -202,6 +202,12 @@ client.on(Events.InteractionCreate, async interaction => {
 					}
 					break;
 				}
+				case 'selectpool':
+					selectPoolValue(wizardId, value);
+					break;
+				case 'assignstat':
+					assignStat(wizardId, value);
+					break;
 				case 'confirm':
 					advanceStep(wizardId);
 					break;
@@ -226,14 +232,16 @@ client.on(Events.InteractionCreate, async interaction => {
 						chosen_moves: allMoves,
 					};
 
+					const maxHp = state.playbookData.creationRules?.maxHP || 20;
+
 					const record = await createCharacter({
 						guildId: state.guildId,
 						ownerUserId: state.userId,
 						name: state.name,
 						playbook: state.playbookKey,
-						stats: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
-						hp: null,
-						hpMax: null,
+						stats: { ...state.stats },
+						hp: maxHp,
+						hpMax: maxHp,
 						xp: 0,
 						loadCurrent: 0,
 						loadMax: 0,

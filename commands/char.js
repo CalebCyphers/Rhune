@@ -597,6 +597,88 @@ function buildWizardStep(interaction, step) {
 		return { embeds: [embed], components: [row] };
 	}
 
+	case 'stats_picker': {
+		const allAssigned = step.allAssigned;
+		const selected = step.selectedPoolValue;
+
+		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it.\nClick an assigned stat to return it to the pool.';
+
+		// Build a scoreboard string showing current assignments
+		const statNames = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+		const scoreboard = Object.entries(step.stats).map(([k, v]) => {
+			const label = statNames[k] || k.toUpperCase();
+			const val = v !== null ? v : '—';
+			return `**${label}** ${val}`;
+		}).join('  |  ');
+
+		const embed = new EmbedBuilder()
+			.setTitle('Assign Your Stats')
+			.setDescription(`${desc}\n\n${scoreboard}`);
+
+		const rows = [];
+
+		// Row 1: Pool values
+		if (step.pool.length > 0) {
+			const poolRow = new ActionRowBuilder();
+			step.pool.forEach(v => {
+				const isSelected = selected === v;
+				poolRow.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:create:selectpool:${v}`)
+						.setLabel(isSelected ? `▸ ${v}` : v)
+						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
+				);
+			});
+			rows.push(poolRow);
+		}
+
+		// Row 2-3: Stat buttons (3 per row in display order)
+		const statOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+		// Split into 2 rows
+		const row1 = new ActionRowBuilder();
+		statOrder.slice(0, 3).forEach(k => {
+			const v = step.stats[k];
+			const isAssigned = v !== null;
+			row1.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:assignstat:${k}`)
+					.setLabel(`${statNames[k]} ${isAssigned ? v : '—'}`)
+					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
+			);
+		});
+		rows.push(row1);
+
+		const row2 = new ActionRowBuilder();
+		statOrder.slice(3).forEach(k => {
+			const v = step.stats[k];
+			const isAssigned = v !== null;
+			row2.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:assignstat:${k}`)
+					.setLabel(`${statNames[k]} ${isAssigned ? v : '—'}`)
+					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
+			);
+		});
+		rows.push(row2);
+
+		// Row 4: Continue
+		rows.push(new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:confirm')
+					.setLabel('Stats Assigned — Continue')
+					.setStyle(ButtonStyle.Success)
+					.setDisabled(!allAssigned),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			),
+		);
+
+		return { embeds: [embed], components: rows };
+	}
+
 	case 'moves_picker': {
 		const grantList = step.autoGranted.map(m => `• \`${m}\``).join('\n');
 
@@ -686,10 +768,11 @@ function buildWizardStep(interaction, step) {
 			.setTitle('Confirm Character')
 			.setDescription(
 				`**Name:** ${step.name}\n` +
-					`**Playbook:** ${step.playbook}\n` +
-					`**Background:** ${step.background}\n` +
-					`**Instinct:** ${step.instinct}\n\n` +
-					`**Starting Moves:**\n${allMovesList}`,
+				`**Playbook:** ${step.playbook}\n` +
+				`**Background:** ${step.background}\n` +
+				`**Instinct:** ${step.instinct}\n` +
+				`**Stats:** ${step.statLine}\n\n` +
+				`**Starting Moves:**\n${allMovesList}`,
 			);
 
 		const row = new ActionRowBuilder()
