@@ -539,7 +539,15 @@ function buildWizardStep(interaction, step) {
 	case 'background_picker': {
 		const embed = new EmbedBuilder()
 			.setTitle('Choose Your Background')
-			.setDescription('Each background shapes your character\'s past and grants different moves.\n**Click a background to see its description.**');
+			.setDescription('Each background shapes your character\'s past and grants different moves. Read about your options below, then choose one.');
+
+		step.backgrounds.forEach(bg => {
+			const grantLine = bg.grants.length > 0 ? `\n*(Grants: ${bg.grants.join(', ')})*` : '';
+			embed.addFields({
+				name: bg.name.substring(0, 256),
+				value: (bg.text + grantLine).substring(0, 1024),
+			});
+		});
 
 		const row = new ActionRowBuilder();
 		step.backgrounds.forEach(bg => {
@@ -557,9 +565,15 @@ function buildWizardStep(interaction, step) {
 	case 'instinct_picker': {
 		const embed = new EmbedBuilder()
 			.setTitle('Choose Your Instinct')
-			.setDescription('Your instinct is what drives you. It colors how you approach every situation.\n**Click an instinct to see its description.**');
+			.setDescription('Your instinct is what drives you. It colors how you approach every situation. Read the options below, then pick one.');
 
-		// instincts can fit 5 buttons in one row
+		step.instincts.forEach(inst => {
+			embed.addFields({
+				name: inst.name.substring(0, 256),
+				value: inst.desc.substring(0, 1024),
+			});
+		});
+
 		const row = new ActionRowBuilder();
 		step.instincts.forEach(inst => {
 			row.addComponents(
