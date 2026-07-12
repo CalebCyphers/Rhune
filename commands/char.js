@@ -569,7 +569,19 @@ function buildWizardStep(interaction, step) {
 			);
 		});
 
-		return { embeds: [embed], components: [row] };
+		const navRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+
+		return { embeds: [embed], components: [row, navRow] };
 	}
 
 	case 'instinct_picker': {
@@ -594,12 +606,26 @@ function buildWizardStep(interaction, step) {
 			);
 		});
 
-		return { embeds: [embed], components: [row] };
+		const navRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+
+		return { embeds: [embed], components: [row, navRow] };
 	}
 
 	case 'stats_picker': {
 		const allAssigned = step.allAssigned;
+		const selectedKey = step.selectedPoolKey;
 		const selected = step.selectedPoolValue;
+		const poolKeys = step.poolKeys || [];
 
 		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it. Click an assigned stat to return it to the pool.\n\n' +
 	'`STR` — Strength — Clash, Defy Danger (might)\n' +
@@ -624,15 +650,16 @@ function buildWizardStep(interaction, step) {
 
 		const rows = [];
 
-		// Row 1-2: Pool values (max 5 per row, split into 2 rows for the initial 6)
-		if (step.pool.length > 0) {
+		// Rows: Pool values (max 5 per row)
+		if (poolKeys.length > 0) {
 			let poolRow = new ActionRowBuilder();
 			let count = 0;
-			step.pool.forEach((v, pi) => {
-				const isSelected = selected === v;
+			poolKeys.forEach((key, pi) => {
+				const v = step.pool[pi];
+				const isSelected = selectedKey === key;
 				poolRow.addComponents(
 					new ButtonBuilder()
-						.setCustomId(`rhune:create:selectpool:${pi}:${v}`)
+						.setCustomId(`rhune:create:selectpool:${key}`)
 						.setLabel(isSelected ? `▸ ${v}` : v)
 						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
 				);
@@ -646,9 +673,8 @@ function buildWizardStep(interaction, step) {
 			if (poolRow.components.length > 0) rows.push(poolRow);
 		}
 
-		// Row 2-3: Stat buttons (3 per row in display order)
+		// Stat buttons (3 per row in display order)
 		const statOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
-		// Split into 2 rows
 		const row1 = new ActionRowBuilder();
 		statOrder.slice(0, 3).forEach(k => {
 			const v = step.stats[k];
@@ -675,9 +701,13 @@ function buildWizardStep(interaction, step) {
 		});
 		rows.push(row2);
 
-		// Row 4: Continue
-		rows.push(new ActionRowBuilder()
+		// Navigation row
+		const navRow = new ActionRowBuilder()
 			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
 				new ButtonBuilder()
 					.setCustomId('rhune:create:confirm')
 					.setLabel('Stats Assigned — Continue')
@@ -687,14 +717,22 @@ function buildWizardStep(interaction, step) {
 					.setCustomId('rhune:create:cancel')
 					.setLabel('Cancel')
 					.setStyle(ButtonStyle.Danger),
-			),
-		);
+			);
+		rows.push(navRow);
 
 		return { embeds: [embed], components: rows };
 	}
 
 	case 'moves_picker': {
-		const grantList = step.autoGranted.map(m => `• \`${m}\``).join('\n');
+		const allMovesData = step.allMovesData || {};
+
+		// Show auto-granted moves WITH their descriptions
+		let grantList = '';
+		step.autoGranted.forEach(m => {
+			const md = allMovesData[m];
+			const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+			grantList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
+		});
 
 		let orStatus = '';
 		if (step.orChoices) {
@@ -703,13 +741,18 @@ function buildWizardStep(interaction, step) {
 				const chosen = step.orSelections[i];
 				orStatus += `\n${group.label}: `;
 				group.options.forEach(o => {
-					orStatus += chosen === o ? ` **✓ ${o}**` : ` ${o}`;
+					const md = allMovesData[o];
+					const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 120) : '';
+					orStatus += chosen === o ? `\n  **✓ ${o}**` : `\n  ${o}`;
+					if (desc) orStatus += ` — ${desc}`;
 				});
 			});
 		}
 
 		const remaining = step.maxPicks - step.currentPicks;
-		let remainingText = remaining === 0 ? 'You have selected enough moves.' : `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+		let remainingText = remaining <= 0
+			? 'You have selected enough moves. Use the dropdown to swap picks if desired.'
+			: `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
 
 		// Check for overflow (Discord dropdown cap is 25)
 		const optionLimit = 25;
@@ -744,23 +787,22 @@ function buildWizardStep(interaction, step) {
 			});
 		}
 
-		// Available moves as a dropdown (max 25 options in Discord)
+		// Available moves as a dropdown (always enabled — allows swapping picks)
 		if (availableSlice.length > 0) {
 			const select = new StringSelectMenuBuilder()
 				.setCustomId('rhune:create:selectmove')
-				.setPlaceholder(remaining > 0 ? `Pick a move (${step.currentPicks}/${step.maxPicks} selected)` : 'All picks used')
-				.setDisabled(remaining === 0)
+				.setPlaceholder(`Pick moves (${step.currentPicks}/${step.maxPicks} selected) — reselect to swap`)
+				.setDisabled(false)
 				.setMinValues(1)
-				.setMaxValues(Math.min(remaining > 0 ? remaining : availableSlice.length, availableSlice.length));
+				.setMaxValues(Math.min(step.maxPicks, availableSlice.length));
 
 			availableSlice.forEach(m => {
 				const isChosen = step.chosenMoves.includes(m.name);
 				const opt = new StringSelectMenuOptionBuilder()
 					.setLabel(isChosen ? `✓ ${m.name}` : m.name)
 					.setValue(m.name)
-					.setDescription((m.text || '').substring(0, 100));
-				// Only set defaults when dropdown is active (prevents too-many-defaults error when disabled)
-				if (isChosen && remaining > 0) {
+					.setDescription((m.text || '').replace(/\n---.*$/s, '').substring(0, 100));
+				if (isChosen) {
 					opt.setDefault(true);
 				}
 				select.addOptions(opt);
@@ -769,12 +811,16 @@ function buildWizardStep(interaction, step) {
 			rows.push(new ActionRowBuilder().addComponents(select));
 		}
 
-		// Confirm / cancel row
+		// Confirm / back / cancel row
 		const actionRow = new ActionRowBuilder()
 			.addComponents(
 				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
 					.setCustomId('rhune:create:confirm')
-					.setLabel('Create Character')
+					.setLabel('Review Character')
 					.setStyle(ButtonStyle.Success)
 					.setDisabled(remaining > 0),
 				new ButtonBuilder()
@@ -788,7 +834,14 @@ function buildWizardStep(interaction, step) {
 	}
 
 	case 'confirm': {
-		const allMovesList = step.allMoves.map(m => `• ${m}`).join('\n');
+		const allMovesData = step.allMovesData || {};
+		let allMovesList = '';
+		step.allMoves.forEach(m => {
+			const md = allMovesData[m];
+			const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+			allMovesList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
+		});
+
 		const embed = new EmbedBuilder()
 			.setTitle('Confirm Character')
 			.setDescription(
@@ -802,6 +855,10 @@ function buildWizardStep(interaction, step) {
 
 		const row = new ActionRowBuilder()
 			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
 				new ButtonBuilder()
 					.setCustomId('rhune:create:finalize')
 					.setLabel('Create & Set Active')

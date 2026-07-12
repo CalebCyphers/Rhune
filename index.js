@@ -69,7 +69,7 @@ const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { renderPlaybookEmbed } = require('./lib/playbooks');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
@@ -203,13 +203,18 @@ client.on(Events.InteractionCreate, async interaction => {
 					break;
 				}
 				case 'selectpool': {
-					const poolParts = interaction.customId.split(':');
-					const poolVal = poolParts.slice(4).join(':');
-					selectPoolValue(wizardId, poolVal);
+					// format: rhune:create:selectpool:<index>:<value>
+					const poolParts = interaction.customId.split(':').slice(3);
+					const poolIndex = parseInt(poolParts[0], 10);
+					const poolVal = poolParts.slice(1).join(':');
+					selectPoolValue(wizardId, poolIndex, poolVal);
 					break;
 				}
 				case 'assignstat':
 					assignStat(wizardId, value);
+					break;
+				case 'back':
+					backStep(wizardId);
 					break;
 				case 'confirm':
 					advanceStep(wizardId);
