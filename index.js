@@ -261,20 +261,29 @@ client.on(Events.InteractionCreate, async interaction => {
 
 					const embed = await renderCharacterSheetEmbed(record);
 
-					// Add a Playbook button if the character has a playbook set.
+					// Sheet action buttons
 					const { lookupPlaybook: lp } = require('./lib/playbooks');
 					const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 					const components = [];
+					const row = new ActionRowBuilder();
+
 					if (record.playbook && lp(record.playbook)) {
-						const row = new ActionRowBuilder()
-							.addComponents(
-								new ButtonBuilder()
-									.setCustomId(`rhune:playbook:${record.id}`)
-									.setLabel('View Playbook')
-									.setStyle(ButtonStyle.Primary),
-							);
-						components.push(row);
+						row.addComponents(
+							new ButtonBuilder()
+								.setCustomId(`rhune:playbook:${record.id}`)
+								.setLabel('Playbook')
+								.setStyle(ButtonStyle.Primary),
+						);
 					}
+
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:edit:${record.id}`)
+							.setLabel('Edit')
+							.setStyle(ButtonStyle.Secondary),
+					);
+
+					components.push(row);
 
 					await interaction.update({ embeds: [embed], components, flags: 64 });
 					return;
