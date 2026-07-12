@@ -624,7 +624,6 @@ function buildWizardStep(interaction, step) {
 	case 'stats_picker': {
 		const allAssigned = step.allAssigned;
 		const selectedKey = step.selectedPoolKey;
-		const selected = step.selectedPoolValue;
 		const poolKeys = step.poolKeys || [];
 
 		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it. Click an assigned stat to return it to the pool.\n\n' +
