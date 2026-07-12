@@ -1,7 +1,6 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 
 const {
-	createCharacter,
 	listCharacters,
 	getCharacterById,
 	setActiveCharacter,
@@ -12,6 +11,8 @@ const {
 } = require('../lib/characters_pb');
 
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
+const { lookupPlaybook } = require('../lib/playbooks');
+const { startWizard, getStepInfo, selectPlaybook } = require('../lib/create_wizard');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
 const { disambiguationMessage } = require('../lib/disambiguation');
@@ -99,27 +100,18 @@ module.exports = {
 			if (sub === 'create') {
 				const name = interaction.options.getString('name');
 				const playbook = interaction.options.getString('playbook');
-				const setActive = interaction.options.getBoolean('set_active') || false;
 
-				const record = await createCharacter({
-					guildId: interaction.guildId,
-					ownerUserId: interaction.user.id,
-					name,
-					playbook,
-					stats: { str: 0, dex: 0, con: 0, int: 0, wis: 0, cha: 0 },
-					hp: null,
-					hpMax: null,
-					xp: 0,
-					loadCurrent: 0,
-					loadMax: 0,
-				});
+				// Start wizard
+				startWizard({ userId: interaction.user.id, guildId: interaction.guildId, name });
 
-				if (setActive) {
-					await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: record.id });
+				if (playbook && lookupPlaybook(playbook)) {
+					// Playbook provided — select it and proceed to background step
+					selectPlaybook(interaction.user.id, playbook);
 				}
 
-				const embed = await renderCharacterSheetEmbed(record);
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+				const step = getStepInfo(interaction.user.id);
+				const { embeds, components } = buildWizardStep(interaction, step);
+				await interaction.reply({ embeds, components, ephemeral: true });
 				return;
 			}
 
@@ -295,7 +287,21 @@ module.exports = {
 				}
 
 				const embed = await renderCharacterSheetEmbed(record);
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+
+				// Add a Playbook button if the character has a playbook set.
+				const components = [];
+				if (record.playbook && lookupPlaybook(record.playbook)) {
+					const row = new ActionRowBuilder()
+						.addComponents(
+							new ButtonBuilder()
+								.setCustomId(`rhune:playbook:${record.id}`)
+								.setLabel('View Playbook')
+								.setStyle(ButtonStyle.Primary),
+						);
+					components.push(row);
+				}
+
+				await interaction.reply({ embeds: [embed], components, ephemeral: true });
 				return;
 			}
 
@@ -492,4 +498,383 @@ module.exports = {
 			await interaction.reply({ content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
 		}
 	},
+
+	buildWizardStep,
 };
+
+// ===== Wizard UI builder (used by create handler and button handlers) =====
+
+const PLAYBOOK_ORDER = ['Blessed', 'Fox', 'Heavy', 'Judge', 'Lightbearer', 'Marshal', 'Ranger', 'Seeker', 'WouldbeHero'];
+
+function buildWizardStep(interaction, step) {
+	if (!step) {
+		return {
+			embeds: [new EmbedBuilder().setDescription('Something went wrong. Please start again with /char create.')],
+			components: [],
+		};
+	}
+
+	switch (step.type) {
+	case 'playbook_picker': {
+		const embed = new EmbedBuilder()
+			.setTitle('Create Character — Choose a Playbook')
+			.setDescription('Each playbook has its own story and style. Read about them below, then pick one.');
+
+		PLAYBOOK_ORDER.forEach(key => {
+			const pb = lookupPlaybook(key);
+			const die = pb.creationRules?.die || 'd6';
+			const hp = pb.creationRules?.maxHP || '?';
+			embed.addFields({
+				name: pb.name,
+				value: `*${pb.tagline}*
+\`Damage ${die}  ·  Max HP ${hp}\``,
+			});
+		});
+
+		const row1 = new ActionRowBuilder();
+		const row2 = new ActionRowBuilder();
+		PLAYBOOK_ORDER.forEach((key, i) => {
+			const pb = lookupPlaybook(key);
+			const btn = new ButtonBuilder()
+				.setCustomId(`rhune:create:pickpb:${key}`)
+				.setLabel(pb.name)
+				.setStyle(ButtonStyle.Secondary);
+			if (i < 5) row1.addComponents(btn);
+			else row2.addComponents(btn);
+		});
+
+		return { embeds: [embed], components: [row1, row2] };
+	}
+
+	case 'background_picker': {
+		const embed = new EmbedBuilder()
+			.setTitle('Choose Your Background')
+			.setDescription('Each background shapes your character\'s past and grants different moves. Read about your options below, then choose one.');
+
+		step.backgrounds.forEach(bg => {
+			const grantLine = bg.grants.length > 0 ? `\n*(Grants: ${bg.grants.join(', ')})*` : '';
+			embed.addFields({
+				name: bg.name.substring(0, 256),
+				value: (bg.text + grantLine).substring(0, 1024),
+			});
+		});
+
+		const row = new ActionRowBuilder();
+		step.backgrounds.forEach(bg => {
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:pickbg:${bg.name}`)
+					.setLabel(bg.name.replace(/^The /, ''))
+					.setStyle(ButtonStyle.Secondary),
+			);
+		});
+
+		const navRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+
+		return { embeds: [embed], components: [row, navRow] };
+	}
+
+	case 'instinct_picker': {
+		const embed = new EmbedBuilder()
+			.setTitle('Choose Your Instinct')
+			.setDescription('Your instinct is what drives you. It colors how you approach every situation. Read the options below, then pick one.');
+
+		step.instincts.forEach(inst => {
+			embed.addFields({
+				name: inst.name.substring(0, 256),
+				value: inst.desc.substring(0, 1024),
+			});
+		});
+
+		const row = new ActionRowBuilder();
+		step.instincts.forEach(inst => {
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:pickinstinct:${inst.name}`)
+					.setLabel(inst.name)
+					.setStyle(ButtonStyle.Secondary),
+			);
+		});
+
+		const navRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+
+		return { embeds: [embed], components: [row, navRow] };
+	}
+
+	case 'stats_picker': {
+		const allAssigned = step.allAssigned;
+		const selectedKey = step.selectedPoolKey;
+		const poolKeys = step.poolKeys || [];
+
+		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it. Click an assigned stat to return it to the pool.\n\n' +
+	'`STR` — Strength — Clash, Defy Danger (might)\n' +
+	'`DEX` — Dexterity — Let Fly, Defy Danger (agility)\n' +
+	'`CON` — Constitution — Defend, Defy Danger (hold steady)\n' +
+	'`INT` — Intelligence — Know Things, Defy Danger (expertise)\n' +
+	'`WIS` — Wisdom — Seek Insight, Defy Danger (senses/will)\n' +
+	'`CHA` — Charisma — Persuade, Defy Danger (socially)\n\n' +
+	'_Stats range from \u22121 to +3. When a move calls for a roll, look here._';
+
+		// Build a scoreboard string showing current assignments
+		const statNames = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+		const scoreboard = Object.entries(step.stats).map(([k, v]) => {
+			const label = statNames[k] || k.toUpperCase();
+			const val = v !== null ? v : '—';
+			return `**${label}** ${val}`;
+		}).join('  |  ');
+
+		const embed = new EmbedBuilder()
+			.setTitle('Assign Your Stats')
+			.setDescription(`${desc}\n\n${scoreboard}`);
+
+		const rows = [];
+
+		// Rows: Pool values (max 5 per row)
+		if (poolKeys.length > 0) {
+			let poolRow = new ActionRowBuilder();
+			let count = 0;
+			poolKeys.forEach((key, pi) => {
+				const v = step.pool[pi];
+				const isSelected = selectedKey === key;
+				poolRow.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:create:selectpool:${key}`)
+						.setLabel(isSelected ? `▸ ${v}` : v)
+						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
+				);
+				count++;
+				if (count === 5) {
+					rows.push(poolRow);
+					poolRow = new ActionRowBuilder();
+					count = 0;
+				}
+			});
+			if (poolRow.components.length > 0) rows.push(poolRow);
+		}
+
+		// Stat buttons (3 per row in display order)
+		const statOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+		const row1 = new ActionRowBuilder();
+		statOrder.slice(0, 3).forEach(k => {
+			const v = step.stats[k];
+			const isAssigned = v !== null;
+			row1.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:assignstat:${k}`)
+					.setLabel(`${statNames[k]} ${isAssigned ? v : '—'}`)
+					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
+			);
+		});
+		rows.push(row1);
+
+		const row2 = new ActionRowBuilder();
+		statOrder.slice(3).forEach(k => {
+			const v = step.stats[k];
+			const isAssigned = v !== null;
+			row2.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:assignstat:${k}`)
+					.setLabel(`${statNames[k]} ${isAssigned ? v : '—'}`)
+					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
+			);
+		});
+		rows.push(row2);
+
+		// Navigation row
+		const navRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:confirm')
+					.setLabel('Stats Assigned — Continue')
+					.setStyle(ButtonStyle.Success)
+					.setDisabled(!allAssigned),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+		rows.push(navRow);
+
+		return { embeds: [embed], components: rows };
+	}
+
+	case 'moves_picker': {
+		const allMovesData = step.allMovesData || {};
+
+		// Show auto-granted moves WITH their descriptions
+		let grantList = '';
+		step.autoGranted.forEach(m => {
+			const md = allMovesData[m];
+			const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+			grantList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
+		});
+
+		let orStatus = '';
+		if (step.orChoices) {
+			orStatus = '\n\n**Choose from these groups:**\n';
+			step.orChoices.forEach((group, i) => {
+				const chosen = step.orSelections[i];
+				orStatus += `\n${group.label}: `;
+				group.options.forEach(o => {
+					const md = allMovesData[o];
+					const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 120) : '';
+					orStatus += chosen === o ? `\n  **✓ ${o}**` : `\n  ${o}`;
+					if (desc) orStatus += ` — ${desc}`;
+				});
+			});
+		}
+
+		const remaining = step.maxPicks - step.currentPicks;
+		let remainingText = remaining <= 0
+			? 'You have selected enough moves. Use the dropdown to swap picks if desired.'
+			: `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+
+		// Check for overflow (Discord dropdown cap is 25)
+		const optionLimit = 25;
+		const overflow = Math.max(0, step.available.length - optionLimit);
+		const availableSlice = step.available.slice(0, optionLimit);
+		if (overflow > 0) {
+			remainingText += `\n\n_(${overflow} more moves available — browse with \`/move\` after creation.)_`;
+		}
+
+		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}`;
+
+		const embed = new EmbedBuilder()
+			.setTitle('Choose Your Starting Moves')
+			.setDescription(embedDesc);
+
+		const rows = [];
+
+		// OR-group picker buttons (if any)
+		if (step.orChoices) {
+			step.orChoices.forEach((group, gi) => {
+				const grpRow = new ActionRowBuilder();
+				group.options.forEach(o => {
+					const isSelected = Object.values(step.orSelections || {}).includes(o);
+					grpRow.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:create:orchoice:${gi}:${o}`)
+							.setLabel(isSelected ? `✓ ${o}` : o)
+							.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
+					);
+				});
+				if (grpRow.components.length > 0) rows.push(grpRow);
+			});
+		}
+
+		// Available moves as a dropdown (always enabled — allows swapping picks)
+		if (availableSlice.length > 0) {
+			const select = new StringSelectMenuBuilder()
+				.setCustomId('rhune:create:selectmove')
+				.setPlaceholder(`Pick moves (${step.currentPicks}/${step.maxPicks} selected) — reselect to swap`)
+				.setDisabled(false)
+				.setMinValues(1)
+				.setMaxValues(Math.min(step.maxPicks, availableSlice.length));
+
+			availableSlice.forEach(m => {
+				const isChosen = step.chosenMoves.includes(m.name);
+				const opt = new StringSelectMenuOptionBuilder()
+					.setLabel(isChosen ? `✓ ${m.name}` : m.name)
+					.setValue(m.name)
+					.setDescription((m.text || '').replace(/\n---.*$/s, '').substring(0, 100));
+				if (isChosen) {
+					opt.setDefault(true);
+				}
+				select.addOptions(opt);
+			});
+
+			rows.push(new ActionRowBuilder().addComponents(select));
+		}
+
+		// Confirm / back / cancel row
+		const actionRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:confirm')
+					.setLabel('Review Character')
+					.setStyle(ButtonStyle.Success)
+					.setDisabled(remaining > 0),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+		rows.push(actionRow);
+
+		return { embeds: [embed], components: rows };
+	}
+
+	case 'confirm': {
+		const allMovesData = step.allMovesData || {};
+		let allMovesList = '';
+		step.allMoves.forEach(m => {
+			const md = allMovesData[m];
+			const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+			allMovesList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
+		});
+
+		const embed = new EmbedBuilder()
+			.setTitle('Confirm Character')
+			.setDescription(
+				`**Name:** ${step.name}\n` +
+				`**Playbook:** ${step.playbook}\n` +
+				`**Background:** ${step.background}\n` +
+				`**Instinct:** ${step.instinct}\n` +
+				`**Stats:** ${step.statLine}\n\n` +
+				`**Starting Moves:**\n${allMovesList}`,
+			);
+
+		const row = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:finalize')
+					.setLabel('Create & Set Active')
+					.setStyle(ButtonStyle.Success),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+
+		return { embeds: [embed], components: [row] };
+	}
+
+	default:
+		return {
+			embeds: [new EmbedBuilder().setDescription('Unknown step. Please start again with /char create.')],
+			components: [],
+		};
+	}
+}
