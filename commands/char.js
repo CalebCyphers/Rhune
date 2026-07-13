@@ -743,17 +743,21 @@ function buildWizardStep(interaction, step) {
 		});
 
 		let orStatus = '';
-		if (step.orChoices) {
-			orStatus = '\n\n**Choose from these groups:**\n';
-			step.orChoices.forEach((group, i) => {
+		if (step.orGroups) {
+			orStatus = '
+
+**Choose from these groups:**';
+			step.orGroups.forEach((group, i) => {
 				const chosen = step.orSelections[i];
-				orStatus += `\n${group.label}: `;
-				group.options.forEach(o => {
-					const md = allMovesData[o];
-					const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 120) : '';
-					orStatus += chosen === o ? `\n  **✓ ${o}**` : `\n  ${o}`;
-					if (desc) orStatus += ` — ${desc}`;
-				});
+				const pkg = chosen ? group.options.find(o => o.name === chosen) : null;
+				orStatus += `\n\n**${group.label}:**`;
+				if (chosen && pkg) {
+					orStatus += `\n  ✓ **${chosen}** — ${pkg.grants.join(', ')}${pkg.desc ? ` (${pkg.desc})` : ''}`;
+				} else {
+					group.options.forEach(p => {
+						orStatus += `\n  • ${p.name}: ${p.grants.join(', ')}${p.desc ? ` — ${p.desc}` : ''}`;
+					});
+				}
 			});
 		}
 
@@ -778,20 +782,30 @@ function buildWizardStep(interaction, step) {
 
 		const rows = [];
 
-		// OR-group picker buttons (if any)
-		if (step.orChoices) {
-			step.orChoices.forEach((group, gi) => {
-				const grpRow = new ActionRowBuilder();
-				group.options.forEach(o => {
-					const isSelected = Object.values(step.orSelections || {}).includes(o);
-					grpRow.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:create:orchoice:${gi}:${o}`)
-							.setLabel(isSelected ? `✓ ${o}` : o)
-							.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
+		// OR-group picker dropdowns (each group = one dropdown where you pick a package)
+		if (step.orGroups) {
+			step.orGroups.forEach((group, gi) => {
+				const selectedPkg = step.orSelections[gi];
+				const select = new StringSelectMenuBuilder()
+					.setCustomId(`rhune:create:orchoice:${gi}`)
+					.setPlaceholder(selectedPkg || `Choose...`)
+					.setMinValues(1)
+					.setMaxValues(1);
+
+				group.options.forEach(pkg => {
+					const grantStr = pkg.grants.join(', ');
+					const label = pkg.desc
+						? `${pkg.name}: ${grantStr} — ${pkg.desc.substring(0, 60)}`
+						: `${pkg.name}: ${grantStr}`;
+					select.addOptions(
+						new StringSelectMenuOptionBuilder()
+							.setLabel(label.substring(0, 100))
+							.setValue(pkg.name)
+							.setDefault(selectedPkg === pkg.name),
 					);
 				});
-				if (grpRow.components.length > 0) rows.push(grpRow);
+
+				rows.push(new ActionRowBuilder().addComponents(select));
 			});
 		}
 
@@ -821,6 +835,9 @@ function buildWizardStep(interaction, step) {
 			rows.push(new ActionRowBuilder().addComponents(select));
 		}
 
+		// Determine if all OR-groups are filled (if any exist)
+		const orGroupsFilled = !step.orGroups || step.orGroups.every((g, i) => step.orSelections[i]);
+
 		// Confirm / back / cancel row
 		const actionRow = new ActionRowBuilder()
 			.addComponents(
@@ -830,9 +847,9 @@ function buildWizardStep(interaction, step) {
 					.setStyle(ButtonStyle.Secondary),
 				new ButtonBuilder()
 					.setCustomId('rhune:create:confirm')
-					.setLabel('Review Character')
+					.setLabel('Continue')
 					.setStyle(ButtonStyle.Success)
-					.setDisabled(remaining > 0),
+					.setDisabled(!orGroupsFilled || remaining > 0),
 				new ButtonBuilder()
 					.setCustomId('rhune:create:cancel')
 					.setLabel('Cancel')

@@ -443,19 +443,6 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'togglemove':
 					toggleMove(wizardId, value);
 					break;
-				case 'orchoice': {
-					const parts = interaction.customId.split(':');
-					const groupIdx = parseInt(parts[3], 10);
-					const moveName = parts.slice(4).join(':');
-					const wiz = getWizard(wizardId);
-					if (wiz?.orChoices?.[groupIdx] === moveName) {
-						setOrChoice(wizardId, groupIdx, null);
-					}
-					else {
-						setOrChoice(wizardId, groupIdx, moveName);
-					}
-					break;
-				}
 				case 'selectpool': {
 					// format: rhune:create:selectpool:<index>:<value>
 					const poolParts = interaction.customId.split(':').slice(3);
@@ -483,10 +470,25 @@ client.on(Events.InteractionCreate, async interaction => {
 						return;
 					}
 
+					const rules = state.playbookData.creationRules;
+
+					// Resolve OR package choices to individual move names
+					const orGrantedMoves = [];
+					if (rules.orGroups && state.orChoices) {
+						for (const [gi, pkgName] of Object.entries(state.orChoices).filter(([, v]) => v)) {
+							const group = rules.orGroups[parseInt(gi)];
+							if (!group) continue;
+							const pkg = group.options.find(o => o.name === pkgName);
+							if (pkg && pkg.grants) {
+								pkg.grants.forEach(m => orGrantedMoves.push(m));
+							}
+						}
+					}
+
 					const allMoves = [
 						...state.grantedMoves,
 						...Object.keys(state.playbookData.startingMoves),
-						...Object.values(state.orChoices || {}).filter(Boolean),
+						...orGrantedMoves,
 						...state.chosenMoves,
 					];
 
@@ -616,16 +618,27 @@ client.on(Events.InteractionCreate, async interaction => {
 	}
 
 	// === Creation wizard select menus ===
-	if (interaction.isStringSelectMenu() && interaction.customId === 'rhune:create:selectmove') {
+	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:create:')) {
 		const wizardId = interaction.user.id;
 		const wizard = getWizard(wizardId);
 		if (!wizard) {
 			await replyEphemeral(interaction, 'No active character creation. Please start with /char create.');
 			return;
 		}
+
 		try {
-			wizard.chosenMoves = interaction.values;
 			const { buildWizardStep } = require('./commands/char');
+
+			if (interaction.customId === 'rhune:create:selectmove') {
+				wizard.chosenMoves = interaction.values;
+			}
+			else if (interaction.customId.startsWith('rhune:create:orchoice:')) {
+				const parts = interaction.customId.split(':');
+				const groupIdx = parseInt(parts[3], 10);
+				const pkgName = interaction.values[0];
+				setOrChoice(wizardId, groupIdx, pkgName);
+			}
+
 			const step = getStepInfo(wizardId);
 			const result = buildWizardStep(interaction, step);
 			await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });
