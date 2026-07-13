@@ -62,6 +62,10 @@ const {
 	Collection,
 	PresenceUpdateStatus,
 	Events,
+	EmbedBuilder,
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
 } = require('discord.js');
 
 const { parsePickCharCustomId } = require('./lib/disambiguation');
@@ -76,7 +80,6 @@ const { replyEphemeral, updateClearComponents } = require('./lib/interaction_hel
  * Build the Edit view embed and components for a character.
  */
 function buildEditView(record) {
-	const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 	const debils = Array.isArray(record.debilities)
 		? record.debilities.filter(Boolean)
@@ -514,7 +517,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
 					// Sheet action buttons
 					const { lookupPlaybook: lp } = require('./lib/playbooks');
-					const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 					const components = [];
 					const row = new ActionRowBuilder();
 
@@ -542,7 +544,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'cancel':
 					clearWizard(wizardId);
 					await interaction.update({
-						embeds: [new (require('discord.js').EmbedBuilder)().setDescription('Character creation cancelled.')],
+						embeds: [new EmbedBuilder().setDescription('Character creation cancelled.')],
 						components: [],
 						flags: 64,
 					});
