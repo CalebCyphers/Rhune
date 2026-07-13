@@ -62,16 +62,89 @@ const {
 	Collection,
 	PresenceUpdateStatus,
 	Events,
+	EmbedBuilder,
+	ActionRowBuilder,
+	ButtonBuilder,
+	ButtonStyle,
 } = require('discord.js');
 
 const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
-const { renderPlaybookEmbed } = require('./lib/playbooks');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
-const { createCharacter, setActiveCharacter } = require('./lib/characters_pb');
+const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
+
+/**
+ * Build the Edit view embed and components for a character.
+ */
+function buildEditView(record) {
+
+	const debils = Array.isArray(record.debilities)
+		? record.debilities.filter(Boolean)
+		: [];
+
+	const allDebilities = ['Weakened', 'Dazed', 'Miserable'];
+	const debilDesc = allDebilities.map(d => `${debils.includes(d) ? '☑' : '☐'} ${d}`).join('\n');
+
+	const editEmbed = new EmbedBuilder()
+		.setTitle(`Editing: ${record.name}`)
+		.setDescription([
+			`**HP:** \`${record.hp ?? '?'}/${record.hp_max ?? '?'}\``,
+			`**XP:** \`${record.xp ?? 0}\``,
+			`**Debilities:**\n${debilDesc}`,
+		].join('\n'))
+		.setTimestamp(new Date());
+
+	const hpRow = new ActionRowBuilder()
+		.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:edithp:${record.id}:-`)
+				.setLabel('HP −1')
+				.setStyle(ButtonStyle.Danger),
+			new ButtonBuilder()
+				.setCustomId(`rhune:edithp:${record.id}:+`)
+				.setLabel('HP +1')
+				.setStyle(ButtonStyle.Success),
+		);
+
+	const xpRow = new ActionRowBuilder()
+		.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:editxp:${record.id}:-`)
+				.setLabel('XP −1')
+				.setStyle(ButtonStyle.Secondary),
+			new ButtonBuilder()
+				.setCustomId(`rhune:editxp:${record.id}:+`)
+				.setLabel('XP +1')
+				.setStyle(ButtonStyle.Secondary),
+		);
+
+	const debilRow = new ActionRowBuilder();
+	for (const d of allDebilities) {
+		const isActive = debils.includes(d);
+		debilRow.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:editdebil:${record.id}:${d}`)
+				.setLabel(`${isActive ? '☑' : '☐'} ${d}`)
+				.setStyle(isActive ? ButtonStyle.Danger : ButtonStyle.Secondary),
+		);
+	}
+
+	const doneRow = new ActionRowBuilder()
+		.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:editdone:${record.id}`)
+				.setLabel('Done')
+				.setStyle(ButtonStyle.Primary),
+		);
+
+	return {
+		editEmbed,
+		editComponents: [hpRow, xpRow, debilRow, doneRow],
+	};
+}
 
 const client = new Client({
 	intents: [
@@ -145,15 +218,196 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Playbook button: rhune:playbook:<charId>
 		if (interaction.customId.startsWith('rhune:playbook:')) {
 			try {
+				// Handle back-to-sheet from playbook view
+				if (interaction.customId.startsWith('rhune:playbook:back:')) {
+					const charId = interaction.customId.slice('rhune:playbook:back:'.length);
+					const record = await getCharacterById({ id: charId });
+					const embed = await renderCharacterSheetEmbed(record);
+
+					const { lookupPlaybook: lp } = require('./lib/playbooks');
+					const row = new ActionRowBuilder();
+					if (record.playbook && lp(record.playbook)) {
+						row.addComponents(
+							new ButtonBuilder()
+								.setCustomId(`rhune:playbook:${record.id}`)
+								.setLabel('Playbook')
+								.setStyle(ButtonStyle.Primary),
+						);
+					}
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:edit:${record.id}`)
+							.setLabel('Edit')
+							.setStyle(ButtonStyle.Secondary),
+					);
+
+					await interaction.update({ embeds: [embed], components: [row], flags: 64 });
+					return;
+				}
+
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
-				const embed = renderPlaybookEmbed(record);
+
+				const { renderPlaybookEmbed: rpe } = require('./lib/playbooks');
+				const embed = rpe(record);
 				if (!embed) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
 				}
-				// Reply in the same ephemeral thread as the sheet.
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+
+				const row = new ActionRowBuilder()
+					.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:playbook:back:${charId}`)
+							.setLabel('‹ Back')
+							.setStyle(ButtonStyle.Secondary),
+					);
+
+				await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Edit button: rhune:edit:<charId>
+		if (interaction.customId.startsWith('rhune:edit:')) {
+			try {
+				const charId = interaction.customId.slice('rhune:edit:'.length);
+				const record = await getCharacterById({ id: charId });
+
+				if (record.guild_id !== interaction.guildId) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
+
+				const { editEmbed, editComponents } = buildEditView(record);
+
+				await interaction.reply({
+					embeds: [editEmbed],
+					components: editComponents,
+					ephemeral: true,
+				});
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Edit HP: rhune:edithp:<charId>:+
+		if (interaction.customId.startsWith('rhune:edithp:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const delta = parts[3] === '+' ? 1 : -1;
+
+				const record = await getCharacterById({ id: charId });
+				const current = typeof record.hp === 'number' ? record.hp : 0;
+				const newHp = Math.max(0, Math.min(record.hp_max ?? current, current + delta));
+
+				await updateCharacter({ id: charId, patch: { hp: newHp } });
+
+				// Re-render the edit view
+				const updated = await getCharacterById({ id: charId });
+				const { editEmbed, editComponents } = buildEditView(updated);
+				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Edit XP: rhune:editxp:<charId>:+
+		if (interaction.customId.startsWith('rhune:editxp:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const delta = parts[3] === '+' ? 1 : -1;
+
+				const record = await getCharacterById({ id: charId });
+				const current = typeof record.xp === 'number' ? record.xp : 0;
+				const newXp = Math.max(0, current + delta);
+
+				await updateCharacter({ id: charId, patch: { xp: newXp } });
+
+				const updated = await getCharacterById({ id: charId });
+				const { editEmbed, editComponents } = buildEditView(updated);
+				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Edit debility: rhune:editdebil:<charId>:<DebilityName>
+		if (interaction.customId.startsWith('rhune:editdebil:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const debilName = parts.slice(3).join(':');
+
+				const record = await getCharacterById({ id: charId });
+				let debils = Array.isArray(record.debilities)
+					? record.debilities.filter(Boolean)
+					: [];
+
+				if (debils.includes(debilName)) {
+					debils = debils.filter(d => d !== debilName);
+				}
+				else {
+					debils.push(debilName);
+				}
+
+				await updateCharacter({ id: charId, patch: { debilities: debils } });
+
+				const updated = await getCharacterById({ id: charId });
+				const { editEmbed, editComponents } = buildEditView(updated);
+				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Edit done: rhune:editdone:<charId>
+		if (interaction.customId.startsWith('rhune:editdone:')) {
+			try {
+				const charId = interaction.customId.slice('rhune:editdone:'.length);
+				const record = await getCharacterById({ id: charId });
+				const embed = await renderCharacterSheetEmbed(record);
+
+				const { lookupPlaybook: lp } = require('./lib/playbooks');
+				const row = new ActionRowBuilder();
+				if (record.playbook && lp(record.playbook)) {
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:playbook:${record.id}`)
+							.setLabel('Playbook')
+							.setStyle(ButtonStyle.Primary),
+					);
+				}
+				row.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:edit:${record.id}`)
+						.setLabel('Edit')
+						.setStyle(ButtonStyle.Secondary),
+				);
+
+				await interaction.update({ embeds: [embed], components: [row], flags: 64 });
 			}
 			catch (err) {
 				console.error(err);
@@ -261,20 +515,28 @@ client.on(Events.InteractionCreate, async interaction => {
 
 					const embed = await renderCharacterSheetEmbed(record);
 
-					// Add a Playbook button if the character has a playbook set.
+					// Sheet action buttons
 					const { lookupPlaybook: lp } = require('./lib/playbooks');
-					const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 					const components = [];
+					const row = new ActionRowBuilder();
+
 					if (record.playbook && lp(record.playbook)) {
-						const row = new ActionRowBuilder()
-							.addComponents(
-								new ButtonBuilder()
-									.setCustomId(`rhune:playbook:${record.id}`)
-									.setLabel('View Playbook')
-									.setStyle(ButtonStyle.Primary),
-							);
-						components.push(row);
+						row.addComponents(
+							new ButtonBuilder()
+								.setCustomId(`rhune:playbook:${record.id}`)
+								.setLabel('Playbook')
+								.setStyle(ButtonStyle.Primary),
+						);
 					}
+
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:edit:${record.id}`)
+							.setLabel('Edit')
+							.setStyle(ButtonStyle.Secondary),
+					);
+
+					components.push(row);
 
 					await interaction.update({ embeds: [embed], components, flags: 64 });
 					return;
@@ -282,7 +544,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'cancel':
 					clearWizard(wizardId);
 					await interaction.update({
-						embeds: [new (require('discord.js').EmbedBuilder)().setDescription('Character creation cancelled.')],
+						embeds: [new EmbedBuilder().setDescription('Character creation cancelled.')],
 						components: [],
 						flags: 64,
 					});

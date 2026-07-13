@@ -288,18 +288,27 @@ module.exports = {
 
 				const embed = await renderCharacterSheetEmbed(record);
 
-				// Add a Playbook button if the character has a playbook set.
+				// Sheet action buttons
 				const components = [];
+				const row = new ActionRowBuilder();
+
 				if (record.playbook && lookupPlaybook(record.playbook)) {
-					const row = new ActionRowBuilder()
-						.addComponents(
-							new ButtonBuilder()
-								.setCustomId(`rhune:playbook:${record.id}`)
-								.setLabel('View Playbook')
-								.setStyle(ButtonStyle.Primary),
-						);
-					components.push(row);
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:playbook:${record.id}`)
+							.setLabel('Playbook')
+							.setStyle(ButtonStyle.Primary),
+					);
 				}
+
+				row.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:edit:${record.id}`)
+						.setLabel('Edit')
+						.setStyle(ButtonStyle.Secondary),
+				);
+
+				components.push(row);
 
 				await interaction.reply({ embeds: [embed], components, ephemeral: true });
 				return;
