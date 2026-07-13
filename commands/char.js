@@ -796,7 +796,9 @@ function buildWizardStep(interaction, step) {
 		}
 
 		// Available moves as a dropdown (always enabled — allows swapping picks)
-		if (availableSlice.length > 0) {
+		// NOTE: Discord requires max_values >= 1 when the component exists.
+		// Some playbooks can have 0 free picks (maxPicks=0); in that case we should not render the select at all.
+		if (availableSlice.length > 0 && step.maxPicks > 0) {
 			const select = new StringSelectMenuBuilder()
 				.setCustomId('rhune:create:selectmove')
 				.setPlaceholder(`Pick moves (${step.currentPicks}/${step.maxPicks} selected) — reselect to swap`)
