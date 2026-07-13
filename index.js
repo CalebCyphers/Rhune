@@ -72,7 +72,7 @@ const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
@@ -248,14 +248,15 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
 
-				const { renderPlaybookEmbed: rpe } = require('./lib/playbooks');
-				const embed = rpe(record);
+				const { renderPlaybookEmbed: rpe, buildPlaybookNav } = require('./lib/playbooks');
+				const embed = rpe(record, 'overview');
 				if (!embed) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
 				}
 
-				const row = new ActionRowBuilder()
+				const navRow = buildPlaybookNav(record);
+				const backRow = new ActionRowBuilder()
 					.addComponents(
 						new ButtonBuilder()
 							.setCustomId(`rhune:playbook:back:${charId}`)
@@ -263,7 +264,7 @@ client.on(Events.InteractionCreate, async interaction => {
 							.setStyle(ButtonStyle.Secondary),
 					);
 
-				await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+				await interaction.reply({ embeds: [embed], components: [navRow, backRow], ephemeral: true });
 			}
 			catch (err) {
 				console.error(err);
@@ -443,19 +444,6 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'togglemove':
 					toggleMove(wizardId, value);
 					break;
-				case 'orchoice': {
-					const parts = interaction.customId.split(':');
-					const groupIdx = parseInt(parts[3], 10);
-					const moveName = parts.slice(4).join(':');
-					const wiz = getWizard(wizardId);
-					if (wiz?.orChoices?.[groupIdx] === moveName) {
-						setOrChoice(wizardId, groupIdx, null);
-					}
-					else {
-						setOrChoice(wizardId, groupIdx, moveName);
-					}
-					break;
-				}
 				case 'selectpool': {
 					// format: rhune:create:selectpool:<index>:<value>
 					const poolParts = interaction.customId.split(':').slice(3);
@@ -466,6 +454,9 @@ client.on(Events.InteractionCreate, async interaction => {
 				}
 				case 'assignstat':
 					assignStat(wizardId, value);
+					break;
+				case 'togglepossession':
+					togglePossession(wizardId, value);
 					break;
 				case 'back':
 					backStep(wizardId);
@@ -480,10 +471,25 @@ client.on(Events.InteractionCreate, async interaction => {
 						return;
 					}
 
+					const rules = state.playbookData.creationRules;
+
+					// Resolve OR package choices to individual move names
+					const orGrantedMoves = [];
+					if (rules.orGroups && state.orChoices) {
+						for (const [gi, pkgName] of Object.entries(state.orChoices).filter(([, v]) => v)) {
+							const group = rules.orGroups[parseInt(gi)];
+							if (!group) continue;
+							const pkg = group.options.find(o => o.name === pkgName);
+							if (pkg && pkg.grants) {
+								pkg.grants.forEach(m => orGrantedMoves.push(m));
+							}
+						}
+					}
+
 					const allMoves = [
 						...state.grantedMoves,
 						...Object.keys(state.playbookData.startingMoves),
-						...Object.values(state.orChoices || {}).filter(Boolean),
+						...orGrantedMoves,
 						...state.chosenMoves,
 					];
 
@@ -492,6 +498,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						background: state.background,
 						instinct: state.instinct,
 						chosen_moves: allMoves,
+						chosen_possessions: state.chosenPossessions || [],
 					};
 
 					const maxHp = state.playbookData.creationRules?.maxHP || 20;
@@ -611,17 +618,61 @@ client.on(Events.InteractionCreate, async interaction => {
 		return;
 	}
 
+	// === Playbook section select menus ===
+	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:playbook:section:')) {
+		const charId = interaction.customId.slice('rhune:playbook:section:'.length);
+		const section = interaction.values[0];
+
+		try {
+			const record = await getCharacterById({ id: charId });
+
+			const { renderPlaybookEmbed: rpe, buildPlaybookNav } = require('./lib/playbooks');
+			const embed = rpe(record, section);
+			if (!embed) {
+				await replyEphemeral(interaction, 'No playbook info found for this character.');
+				return;
+			}
+
+			const navRow = buildPlaybookNav(record);
+			const backRow = new ActionRowBuilder()
+				.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:playbook:back:${charId}`)
+						.setLabel('‹ Back')
+						.setStyle(ButtonStyle.Secondary),
+				);
+
+			await interaction.update({ embeds: [embed], components: [navRow, backRow], flags: 64 });
+		}
+		catch (err) {
+			console.error(err);
+			await replyEphemeral(interaction, `Error: ${err.message}`);
+		}
+		return;
+	}
+
 	// === Creation wizard select menus ===
-	if (interaction.isStringSelectMenu() && interaction.customId === 'rhune:create:selectmove') {
+	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:create:')) {
 		const wizardId = interaction.user.id;
 		const wizard = getWizard(wizardId);
 		if (!wizard) {
 			await replyEphemeral(interaction, 'No active character creation. Please start with /char create.');
 			return;
 		}
+
 		try {
-			wizard.chosenMoves = interaction.values;
 			const { buildWizardStep } = require('./commands/char');
+
+			if (interaction.customId === 'rhune:create:selectmove') {
+				wizard.chosenMoves = interaction.values;
+			}
+			else if (interaction.customId.startsWith('rhune:create:orchoice:')) {
+				const parts = interaction.customId.split(':');
+				const groupIdx = parseInt(parts[3], 10);
+				const pkgName = interaction.values[0];
+				setOrChoice(wizardId, groupIdx, pkgName);
+			}
+
 			const step = getStepInfo(wizardId);
 			const result = buildWizardStep(interaction, step);
 			await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });

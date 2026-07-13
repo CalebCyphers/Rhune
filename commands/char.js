@@ -743,26 +743,47 @@ function buildWizardStep(interaction, step) {
 		});
 
 		let orStatus = '';
-		if (step.orChoices) {
-			orStatus = '\n\n**Choose from these groups:**\n';
-			step.orChoices.forEach((group, i) => {
+		if (step.orGroups) {
+			step.orGroups.forEach((group, i) => {
 				const chosen = step.orSelections[i];
-				orStatus += `\n${group.label}: `;
-				group.options.forEach(o => {
-					const md = allMovesData[o];
-					const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 120) : '';
-					orStatus += chosen === o ? `\n  **✓ ${o}**` : `\n  ${o}`;
-					if (desc) orStatus += ` — ${desc}`;
-				});
+				const pkg = chosen ? group.options.find(o => o.name === chosen) : null;
+				orStatus += `\n\n**${group.label}:**`;
+				if (chosen && pkg) {
+					// Show each granted move with its description
+					pkg.grants.forEach(m => {
+						const md = allMovesData[m];
+						const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+						orStatus += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
+					});
+				}
+				else {
+					group.options.forEach(p => {
+						orStatus += `\n  • **${p.name}**: ${p.grants.join(', ')}`;
+					});
+				}
 			});
 		}
 
 		const remaining = step.maxPicks - step.currentPicks;
-		let remainingText = remaining <= 0
-			? 'You have selected enough moves. Use the dropdown to swap picks if desired.'
-			: `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
 
-		// Check for overflow (Discord dropdown cap is 25)
+		let chosenMovesList = '';
+		if (step.currentPicks > 0) {
+			step.chosenMoves.forEach(m => {
+				const md = allMovesData[m];
+				const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+				chosenMovesList += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
+			});
+		}
+		let remainingText = chosenMovesList ? `**Selected moves:**${chosenMovesList}` : '';
+		if (remaining > 0 && step.currentPicks > 0) {
+			remainingText += `\n\n_Pick ${remaining} more from the dropdown below._`;
+		}
+		else if (remaining > 0 && step.currentPicks === 0) {
+			remainingText = `**Pick ${remaining} move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+		}
+		else if (step.currentPicks > 0) {
+			remainingText += '\n\n_All picks made. Use the dropdown to swap if desired._';
+		}
 		const optionLimit = 25;
 		const overflow = Math.max(0, step.available.length - optionLimit);
 		const availableSlice = step.available.slice(0, optionLimit);
@@ -778,25 +799,34 @@ function buildWizardStep(interaction, step) {
 
 		const rows = [];
 
-		// OR-group picker buttons (if any)
-		if (step.orChoices) {
-			step.orChoices.forEach((group, gi) => {
-				const grpRow = new ActionRowBuilder();
-				group.options.forEach(o => {
-					const isSelected = Object.values(step.orSelections || {}).includes(o);
-					grpRow.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:create:orchoice:${gi}:${o}`)
-							.setLabel(isSelected ? `✓ ${o}` : o)
-							.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
+		// OR-group picker dropdowns (each group = one dropdown where you pick a package)
+		if (step.orGroups) {
+			step.orGroups.forEach((group, gi) => {
+				const selectedPkg = step.orSelections[gi];
+				const select = new StringSelectMenuBuilder()
+					.setCustomId(`rhune:create:orchoice:${gi}`)
+					.setPlaceholder(selectedPkg || 'Choose...')
+					.setMinValues(1)
+					.setMaxValues(1);
+
+				group.options.forEach(pkg => {
+					const label = `${pkg.name}: ${pkg.grants.join(', ')}`;
+					select.addOptions(
+						new StringSelectMenuOptionBuilder()
+							.setLabel(label.substring(0, 100))
+							.setValue(pkg.name)
+							.setDefault(selectedPkg === pkg.name),
 					);
 				});
-				if (grpRow.components.length > 0) rows.push(grpRow);
+
+				rows.push(new ActionRowBuilder().addComponents(select));
 			});
 		}
 
 		// Available moves as a dropdown (always enabled — allows swapping picks)
-		if (availableSlice.length > 0) {
+		// NOTE: Discord requires max_values >= 1 when the component exists.
+		// Some playbooks can have 0 free picks (maxPicks=0); in that case we should not render the select at all.
+		if (availableSlice.length > 0 && step.maxPicks > 0) {
 			const select = new StringSelectMenuBuilder()
 				.setCustomId('rhune:create:selectmove')
 				.setPlaceholder(`Pick moves (${step.currentPicks}/${step.maxPicks} selected) — reselect to swap`)
@@ -819,12 +849,73 @@ function buildWizardStep(interaction, step) {
 			rows.push(new ActionRowBuilder().addComponents(select));
 		}
 
+		// Determine if all OR-groups are filled (if any exist)
+		const orGroupsFilled = !step.orGroups || step.orGroups.every((g, i) => step.orSelections[i]);
+
 		// Confirm / back / cancel row
 		const actionRow = new ActionRowBuilder()
 			.addComponents(
 				new ButtonBuilder()
 					.setCustomId('rhune:create:back')
 					.setLabel('‹ Back')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:confirm')
+					.setLabel('Continue')
+					.setStyle(ButtonStyle.Success)
+					.setDisabled(!orGroupsFilled || remaining > 0),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+		rows.push(actionRow);
+
+		return { embeds: [embed], components: rows };
+	}
+
+	case 'possessions_picker': {
+		const options = step.options || [];
+		const always = step.always || [];
+		const chosen = step.chosen || [];
+		const pickCount = step.pickCount || 0;
+		const remaining = pickCount - chosen.length;
+
+		const alwaysText = always.length
+			? `**Always included:**\n${always.map(a => `• ${a}`).join('\n')}\n\n`
+			: '';
+
+		const embed = new EmbedBuilder()
+			.setTitle('Special Possessions')
+			.setDescription(
+				`${alwaysText}**Pick ${pickCount} special possession${pickCount === 1 ? '' : 's'} from below.**\n` +
+				`${remaining <= 0 ? 'Ready! Press Continue when done.' : `${remaining} more to pick.`}`,
+			);
+
+		// Max 5 buttons per row, 5 rows = 25 options max
+		const rows = [];
+		let row = new ActionRowBuilder();
+		for (const opt of options) {
+			const isActive = chosen.includes(opt.name);
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:togglepossession:${opt.name}`)
+					.setLabel(isActive ? `✓ ${opt.name}` : opt.name.slice(0, 80))
+					.setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Secondary),
+			);
+			if (row.components.length === 5) {
+				rows.push(row);
+				row = new ActionRowBuilder();
+				if (rows.length === 5) break;
+			}
+		}
+		if (row.components.length) rows.push(row);
+
+		const actionRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back to Moves')
 					.setStyle(ButtonStyle.Secondary),
 				new ButtonBuilder()
 					.setCustomId('rhune:create:confirm')
@@ -858,7 +949,8 @@ function buildWizardStep(interaction, step) {
 				`**Background:** ${step.background}\n` +
 				`**Instinct:** ${step.instinct}\n` +
 				`**Stats:** ${step.statLine}\n\n` +
-				`**Starting Moves:**\n${allMovesList}`,
+				`**Starting Moves:**\n${allMovesList}` +
+				`\n**Special Possessions:**\n${(step.possessions || []).length ? step.possessions.map(p => `• ${p}`).join('\n') : '—'}`,
 			);
 
 		const row = new ActionRowBuilder()
