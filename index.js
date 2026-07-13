@@ -78,7 +78,7 @@ const { replyEphemeral, updateClearComponents, handleError } = require('./lib/in
 const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
-const { moves, getCategoryLabel, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
+const { moves, categoryNames, getCategoryLabel, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
@@ -273,6 +273,46 @@ client.on(Events.InteractionCreate, async interaction => {
 			}
 			return;
 		}
+
+		// === Move reference from sheet button ===
+		if (interaction.customId.startsWith('rhune:move:sheet:')) {
+			try {
+				const embed = new EmbedBuilder()
+					.setTitle('📖 Move Reference')
+					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
+
+				const rows = categoryNames.map(cat => {
+					const catMoves = moves[cat];
+					const count = Object.keys(catMoves).length;
+					return {
+						name: getCategoryLabel(cat),
+						value: count + ' move' + (count === 1 ? '' : 's'),
+						inline: true,
+					};
+				});
+
+				for (let i = 0; i < rows.length; i += 3) {
+					embed.addFields(rows.slice(i, i + 3));
+				}
+
+				const backToCategories = new ActionRowBuilder()
+					.addComponents(
+						...categoryNames.map(cat =>
+							new ButtonBuilder()
+								.setCustomId('rhune:move:cat:' + cat)
+								.setLabel(getCategoryLabel(cat))
+								.setStyle(ButtonStyle.Secondary),
+						),
+					);
+
+				await interaction.reply({ embeds: [embed], components: [backToCategories], ephemeral: true });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
 		// === Move reference buttons ===
 		// rhune:move:cat:<category> — show category overview + move picker
 		if (interaction.customId.startsWith('rhune:move:cat:')) {
