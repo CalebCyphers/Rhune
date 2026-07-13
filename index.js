@@ -245,7 +245,8 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
 
-				const embed = renderPlaybookEmbed(record);
+				const { renderPlaybookEmbed: rpe } = require('./lib/playbooks');
+				const embed = rpe(record);
 				if (!embed) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
