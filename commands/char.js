@@ -764,11 +764,23 @@ function buildWizardStep(interaction, step) {
 		}
 
 		const remaining = step.maxPicks - step.currentPicks;
-		let remainingText = remaining <= 0
-			? 'You have selected enough moves. Use the dropdown to swap picks if desired.'
-			: `**Pick ${remaining} more move${remaining === 1 ? '' : 's'} from the dropdown below**`;
 
-		// Check for overflow (Discord dropdown cap is 25)
+		let chosenMovesList = '';
+		if (step.currentPicks > 0) {
+			step.chosenMoves.forEach(m => {
+				const md = allMovesData[m];
+				const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+				chosenMovesList += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
+			});
+		}
+		let remainingText = chosenMovesList ? `**Selected moves:**${chosenMovesList}` : '';
+		if (remaining > 0 && step.currentPicks > 0) {
+			remainingText += `\n\n_Pick ${remaining} more from the dropdown below._`;
+		} else if (remaining > 0 && step.currentPicks === 0) {
+			remainingText = `**Pick ${remaining} move${remaining === 1 ? '' : 's'} from the dropdown below**`;
+		} else if (step.currentPicks > 0) {
+			remainingText += `\n\n_All picks made. Use the dropdown to swap if desired._`;
+		}
 		const optionLimit = 25;
 		const overflow = Math.max(0, step.available.length - optionLimit);
 		const availableSlice = step.available.slice(0, optionLimit);
