@@ -755,7 +755,8 @@ function buildWizardStep(interaction, step) {
 						const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
 						orStatus += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
 					});
-				} else {
+				}
+				else {
 					group.options.forEach(p => {
 						orStatus += `\n  • **${p.name}**: ${p.grants.join(', ')}`;
 					});
@@ -776,10 +777,12 @@ function buildWizardStep(interaction, step) {
 		let remainingText = chosenMovesList ? `**Selected moves:**${chosenMovesList}` : '';
 		if (remaining > 0 && step.currentPicks > 0) {
 			remainingText += `\n\n_Pick ${remaining} more from the dropdown below._`;
-		} else if (remaining > 0 && step.currentPicks === 0) {
+		}
+		else if (remaining > 0 && step.currentPicks === 0) {
 			remainingText = `**Pick ${remaining} move${remaining === 1 ? '' : 's'} from the dropdown below**`;
-		} else if (step.currentPicks > 0) {
-			remainingText += `\n\n_All picks made. Use the dropdown to swap if desired._`;
+		}
+		else if (step.currentPicks > 0) {
+			remainingText += '\n\n_All picks made. Use the dropdown to swap if desired._';
 		}
 		const optionLimit = 25;
 		const overflow = Math.max(0, step.available.length - optionLimit);
@@ -802,7 +805,7 @@ function buildWizardStep(interaction, step) {
 				const selectedPkg = step.orSelections[gi];
 				const select = new StringSelectMenuBuilder()
 					.setCustomId(`rhune:create:orchoice:${gi}`)
-					.setPlaceholder(selectedPkg || `Choose...`)
+					.setPlaceholder(selectedPkg || 'Choose...')
 					.setMinValues(1)
 					.setMaxValues(1);
 
