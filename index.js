@@ -74,7 +74,12 @@ const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
-const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
+const { replyEphemeral, updateClearComponents, handleError } = require('./lib/interaction_helpers');
+const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
+const { buildWizardStep } = require('./commands/char');
+const { doCharAction } = require('./lib/char_ops');
+
+const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
 /**
  * Build the Edit view embed and components for a character.
@@ -178,8 +183,6 @@ for (const file of commandFiles) {
 	}
 }
 
-const { pbDiagnostics } = require('./lib/pb_diagnostics');
-
 client.once(Events.ClientReady, async () => {
 	console.log(`Ready! Logged in as ${client.user.tag}`);
 
@@ -224,9 +227,8 @@ client.on(Events.InteractionCreate, async interaction => {
 					const record = await getCharacterById({ id: charId });
 					const embed = await renderCharacterSheetEmbed(record);
 
-					const { lookupPlaybook: lp } = require('./lib/playbooks');
 					const row = new ActionRowBuilder();
-					if (record.playbook && lp(record.playbook)) {
+					if (record.playbook && lookupPlaybook(record.playbook)) {
 						row.addComponents(
 							new ButtonBuilder()
 								.setCustomId(`rhune:playbook:${record.id}`)
@@ -248,8 +250,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
 
-				const { renderPlaybookEmbed: rpe, buildPlaybookNav } = require('./lib/playbooks');
-				const embed = rpe(record, 'overview');
+				const embed = renderPlaybookEmbed(record, 'overview');
 				if (!embed) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
@@ -267,8 +268,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await interaction.reply({ embeds: [embed], components: [navRow, backRow], ephemeral: true });
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -297,8 +297,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				});
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -322,8 +321,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -346,8 +344,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -378,8 +375,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -391,9 +387,9 @@ client.on(Events.InteractionCreate, async interaction => {
 				const record = await getCharacterById({ id: charId });
 				const embed = await renderCharacterSheetEmbed(record);
 
-				const { lookupPlaybook: lp } = require('./lib/playbooks');
+
 				const row = new ActionRowBuilder();
-				if (record.playbook && lp(record.playbook)) {
+				if (record.playbook && lookupPlaybook(record.playbook)) {
 					row.addComponents(
 						new ButtonBuilder()
 							.setCustomId(`rhune:playbook:${record.id}`)
@@ -411,8 +407,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await interaction.update({ embeds: [embed], components: [row], flags: 64 });
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -429,7 +424,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			try {
 				const action = interaction.customId.replace('rhune:create:', '').split(':')[0];
 				const value = interaction.customId.split(':').slice(3).join(':');
-				const { buildWizardStep } = require('./commands/char');
+
 
 				switch (action) {
 				case 'pickpb':
@@ -523,11 +518,11 @@ client.on(Events.InteractionCreate, async interaction => {
 					const embed = await renderCharacterSheetEmbed(record);
 
 					// Sheet action buttons
-					const { lookupPlaybook: lp } = require('./lib/playbooks');
+
 					const components = [];
 					const row = new ActionRowBuilder();
 
-					if (record.playbook && lp(record.playbook)) {
+					if (record.playbook && lookupPlaybook(record.playbook)) {
 						row.addComponents(
 							new ButtonBuilder()
 								.setCustomId(`rhune:playbook:${record.id}`)
@@ -563,8 +558,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });
 			}
 			catch (err) {
-				console.error(err);
-				await replyEphemeral(interaction, `Error: ${err.message}`);
+				handleError(interaction, err);
 			}
 			return;
 		}
@@ -589,7 +583,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				return;
 			}
 
-			const { doCharAction } = require('./lib/char_ops');
+
 			const result = await doCharAction({
 				action: pending.action,
 				guildId: interaction.guildId,
@@ -612,8 +606,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			await interaction.reply({ content: 'Unknown action.', ephemeral: true });
 		}
 		catch (err) {
-			console.error(err);
-			await replyEphemeral(interaction, `Error: ${err.message}`);
+			handleError(interaction, err);
 		}
 		return;
 	}
@@ -626,8 +619,8 @@ client.on(Events.InteractionCreate, async interaction => {
 		try {
 			const record = await getCharacterById({ id: charId });
 
-			const { renderPlaybookEmbed: rpe, buildPlaybookNav } = require('./lib/playbooks');
-			const embed = rpe(record, section);
+
+			const embed = renderPlaybookEmbed(record, section);
 			if (!embed) {
 				await replyEphemeral(interaction, 'No playbook info found for this character.');
 				return;
@@ -645,8 +638,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			await interaction.update({ embeds: [embed], components: [navRow, backRow], flags: 64 });
 		}
 		catch (err) {
-			console.error(err);
-			await replyEphemeral(interaction, `Error: ${err.message}`);
+			handleError(interaction, err);
 		}
 		return;
 	}
@@ -661,7 +653,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		}
 
 		try {
-			const { buildWizardStep } = require('./commands/char');
+
 
 			if (interaction.customId === 'rhune:create:selectmove') {
 				wizard.chosenMoves = interaction.values;
@@ -678,8 +670,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });
 		}
 		catch (err) {
-			console.error(err);
-			await replyEphemeral(interaction, `Error: ${err.message}`);
+			handleError(interaction, err);
 		}
 		return;
 	}
