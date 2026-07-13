@@ -299,13 +299,11 @@ client.on(Events.InteractionCreate, async interaction => {
 					return {
 						name: getCategoryLabel(cat),
 						value: count + ' move' + (count === 1 ? '' : 's'),
-						inline: true,
+						inline: false,
 					};
 				});
 
-				for (let i = 0; i < rows.length; i += 3) {
-					embed.addFields(rows.slice(i, i + 3));
-				}
+				embed.addFields(rows);
 
 				const backToCategories = new ActionRowBuilder()
 					.addComponents(
