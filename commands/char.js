@@ -744,16 +744,20 @@ function buildWizardStep(interaction, step) {
 
 		let orStatus = '';
 		if (step.orGroups) {
-			orStatus = '\n\n**Choose from these groups:**';
 			step.orGroups.forEach((group, i) => {
 				const chosen = step.orSelections[i];
 				const pkg = chosen ? group.options.find(o => o.name === chosen) : null;
 				orStatus += `\n\n**${group.label}:**`;
 				if (chosen && pkg) {
-					orStatus += `\n  ✓ **${chosen}** — ${pkg.grants.join(', ')}${pkg.desc ? ` (${pkg.desc})` : ''}`;
+					// Show each granted move with its description
+					pkg.grants.forEach(m => {
+						const md = allMovesData[m];
+						const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
+						orStatus += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
+					});
 				} else {
 					group.options.forEach(p => {
-						orStatus += `\n  • ${p.name}: ${p.grants.join(', ')}${p.desc ? ` — ${p.desc}` : ''}`;
+						orStatus += `\n  • **${p.name}**: ${p.grants.join(', ')}`;
 					});
 				}
 			});
@@ -791,10 +795,7 @@ function buildWizardStep(interaction, step) {
 					.setMaxValues(1);
 
 				group.options.forEach(pkg => {
-					const grantStr = pkg.grants.join(', ');
-					const label = pkg.desc
-						? `${pkg.name}: ${grantStr} — ${pkg.desc.substring(0, 60)}`
-						: `${pkg.name}: ${grantStr}`;
+					const label = `${pkg.name}: ${pkg.grants.join(', ')}`;
 					select.addOptions(
 						new StringSelectMenuOptionBuilder()
 							.setLabel(label.substring(0, 100))
