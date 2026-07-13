@@ -248,14 +248,15 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
 
-				const { renderPlaybookEmbed: rpe } = require('./lib/playbooks');
-				const embed = rpe(record);
+				const { renderPlaybookEmbed: rpe, buildPlaybookNav } = require('./lib/playbooks');
+				const embed = rpe(record, 'overview');
 				if (!embed) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
 				}
 
-				const row = new ActionRowBuilder()
+				const navRow = buildPlaybookNav(record);
+				const backRow = new ActionRowBuilder()
 					.addComponents(
 						new ButtonBuilder()
 							.setCustomId(`rhune:playbook:back:${charId}`)
@@ -263,7 +264,7 @@ client.on(Events.InteractionCreate, async interaction => {
 							.setStyle(ButtonStyle.Secondary),
 					);
 
-				await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+				await interaction.reply({ embeds: [embed], components: [navRow, backRow], ephemeral: true });
 			}
 			catch (err) {
 				console.error(err);
@@ -609,6 +610,39 @@ client.on(Events.InteractionCreate, async interaction => {
 			}
 
 			await interaction.reply({ content: 'Unknown action.', ephemeral: true });
+		}
+		catch (err) {
+			console.error(err);
+			await replyEphemeral(interaction, `Error: ${err.message}`);
+		}
+		return;
+	}
+
+	// === Playbook section select menus ===
+	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:playbook:section:')) {
+		const charId = interaction.customId.slice('rhune:playbook:section:'.length);
+		const section = interaction.values[0];
+
+		try {
+			const record = await getCharacterById({ id: charId });
+
+			const { renderPlaybookEmbed: rpe, buildPlaybookNav } = require('./lib/playbooks');
+			const embed = rpe(record, section);
+			if (!embed) {
+				await replyEphemeral(interaction, 'No playbook info found for this character.');
+				return;
+			}
+
+			const navRow = buildPlaybookNav(record);
+			const backRow = new ActionRowBuilder()
+				.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:playbook:back:${charId}`)
+						.setLabel('‹ Back')
+						.setStyle(ButtonStyle.Secondary),
+				);
+
+			await interaction.update({ embeds: [embed], components: [navRow, backRow], flags: 64 });
 		}
 		catch (err) {
 			console.error(err);
