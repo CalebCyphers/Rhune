@@ -744,9 +744,7 @@ function buildWizardStep(interaction, step) {
 
 		let orStatus = '';
 		if (step.orGroups) {
-			orStatus = '
-
-**Choose from these groups:**';
+			orStatus = '\n\n**Choose from these groups:**';
 			step.orGroups.forEach((group, i) => {
 				const chosen = step.orSelections[i];
 				const pkg = chosen ? group.options.find(o => o.name === chosen) : null;
