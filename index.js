@@ -72,7 +72,7 @@ const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
 
@@ -467,6 +467,9 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'assignstat':
 					assignStat(wizardId, value);
 					break;
+				case 'togglepossession':
+					togglePossession(wizardId, value);
+					break;
 				case 'back':
 					backStep(wizardId);
 					break;
@@ -492,6 +495,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						background: state.background,
 						instinct: state.instinct,
 						chosen_moves: allMoves,
+						chosen_possessions: state.chosenPossessions || [],
 					};
 
 					const maxHp = state.playbookData.creationRules?.maxHP || 20;

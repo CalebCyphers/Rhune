@@ -841,6 +841,64 @@ function buildWizardStep(interaction, step) {
 		return { embeds: [embed], components: rows };
 	}
 
+	case 'possessions_picker': {
+		const options = step.options || [];
+		const always = step.always || [];
+		const chosen = step.chosen || [];
+		const pickCount = step.pickCount || 0;
+		const remaining = pickCount - chosen.length;
+
+		const alwaysText = always.length
+			? `**Always included:**\n${always.map(a => `• ${a}`).join('\n')}\n\n`
+			: '';
+
+		const embed = new EmbedBuilder()
+			.setTitle('Special Possessions')
+			.setDescription(
+				`${alwaysText}**Pick ${pickCount} special possession${pickCount === 1 ? '' : 's'} from below.**\n` +
+				`${remaining <= 0 ? 'Ready! Press Continue when done.' : `${remaining} more to pick.`}`,
+			);
+
+		// Max 5 buttons per row, 5 rows = 25 options max
+		const rows = [];
+		let row = new ActionRowBuilder();
+		for (const opt of options) {
+			const isActive = chosen.includes(opt.name);
+			row.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:togglepossession:${opt.name}`)
+					.setLabel(isActive ? `✓ ${opt.name}` : opt.name.slice(0, 80))
+					.setStyle(isActive ? ButtonStyle.Success : ButtonStyle.Secondary),
+			);
+			if (row.components.length === 5) {
+				rows.push(row);
+				row = new ActionRowBuilder();
+				if (rows.length === 5) break;
+			}
+		}
+		if (row.components.length) rows.push(row);
+
+		const actionRow = new ActionRowBuilder()
+			.addComponents(
+				new ButtonBuilder()
+					.setCustomId('rhune:create:back')
+					.setLabel('‹ Back to Moves')
+					.setStyle(ButtonStyle.Secondary),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:confirm')
+					.setLabel('Review Character')
+					.setStyle(ButtonStyle.Success)
+					.setDisabled(remaining > 0),
+				new ButtonBuilder()
+					.setCustomId('rhune:create:cancel')
+					.setLabel('Cancel')
+					.setStyle(ButtonStyle.Danger),
+			);
+		rows.push(actionRow);
+
+		return { embeds: [embed], components: rows };
+	}
+
 	case 'confirm': {
 		const allMovesData = step.allMovesData || {};
 		let allMovesList = '';
@@ -858,7 +916,8 @@ function buildWizardStep(interaction, step) {
 				`**Background:** ${step.background}\n` +
 				`**Instinct:** ${step.instinct}\n` +
 				`**Stats:** ${step.statLine}\n\n` +
-				`**Starting Moves:**\n${allMovesList}`,
+				`**Starting Moves:**\n${allMovesList}` +
+				`\n**Special Possessions:**\n${(step.possessions || []).length ? step.possessions.map(p => `• ${p}`).join('\n') : '—'}`,
 			);
 
 		const row = new ActionRowBuilder()
