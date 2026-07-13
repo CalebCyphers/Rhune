@@ -68,7 +68,6 @@ const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
-const { renderPlaybookEmbed } = require('./lib/playbooks');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents } = require('./lib/interaction_helpers');
@@ -147,13 +146,42 @@ client.on(Events.InteractionCreate, async interaction => {
 			try {
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
+
+				const { lookupPlaybook, renderPlaybookEmbed, getCharacterMoveList } = require('./lib/playbooks');
+				const pb = lookupPlaybook(record.playbook);
 				const embed = renderPlaybookEmbed(record);
 				if (!embed) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
 				}
+
+				const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+				const moveList = getCharacterMoveList(record, pb);
+				const maxButtons = 25;
+				const maxMoves = Math.min(moveList.length, maxButtons);
+				const components = [];
+
+				let row = new ActionRowBuilder();
+				for (let i = 0; i < maxMoves; i++) {
+					const moveName = moveList[i];
+					const safeName = String(moveName).slice(0, 80);
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:rollmove:${record.id}:${moveName}`)
+							.setLabel(`Roll: ${safeName}`.slice(0, 80))
+							.setStyle(ButtonStyle.Secondary),
+					);
+
+					if (row.components.length === 5) {
+						components.push(row);
+						row = new ActionRowBuilder();
+						if (components.length === 5) break;
+					}
+				}
+				if (row.components.length && components.length < 5) components.push(row);
+
 				// Reply in the same ephemeral thread as the sheet.
-				await interaction.reply({ embeds: [embed], ephemeral: true });
+				await interaction.reply({ embeds: [embed], components, ephemeral: true });
 			}
 			catch (err) {
 				console.error(err);
@@ -301,6 +329,136 @@ client.on(Events.InteractionCreate, async interaction => {
 				const step = getStepInfo(wizardId);
 				const result = buildWizardStep(interaction, step);
 				await interaction.update({ embeds: result.embeds, components: result.components, flags: 64 });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Roll a move: rhune:rollmove:<charId>:<moveName>
+		if (interaction.customId.startsWith('rhune:rollmove:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const moveName = parts.slice(3).join(':');
+
+				const record = await getCharacterById({ id: charId });
+				if (record.guild_id !== interaction.guildId) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
+
+				const { getMoveRollStat, getStatMod, statLabel } = require('./lib/move_rolls');
+				const statKey = getMoveRollStat(moveName);
+				if (!statKey) {
+					await replyEphemeral(interaction, `No roll mapping found for **${moveName}** yet.`);
+					return;
+				}
+
+				const mod = getStatMod(record.stats, statKey);
+				const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+				const embed = new EmbedBuilder()
+					.setTitle(`Roll Move: ${moveName}`)
+					.setDescription(`Character: **${record.name}**\nStat: **${statLabel(statKey)}** (${mod >= 0 ? '+' : ''}${mod})`)
+					.setTimestamp(new Date());
+
+				const row = new ActionRowBuilder()
+					.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:rollconfirm:${charId}:${moveName}:normal`)
+							.setLabel('Roll')
+							.setStyle(ButtonStyle.Primary),
+						new ButtonBuilder()
+							.setCustomId(`rhune:rollconfirm:${charId}:${moveName}:adv`)
+							.setLabel('Adv')
+							.setStyle(ButtonStyle.Secondary),
+						new ButtonBuilder()
+							.setCustomId(`rhune:rollconfirm:${charId}:${moveName}:dis`)
+							.setLabel('Dis')
+							.setStyle(ButtonStyle.Secondary),
+						new ButtonBuilder()
+							.setCustomId('rhune:rollconfirm:cancel')
+							.setLabel('Cancel')
+							.setStyle(ButtonStyle.Danger),
+					);
+
+				await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+			}
+			catch (err) {
+				console.error(err);
+				await replyEphemeral(interaction, `Error: ${err.message}`);
+			}
+			return;
+		}
+
+		// Confirm roll: rhune:rollconfirm:<charId>:<moveName>:<mode>
+		if (interaction.customId.startsWith('rhune:rollconfirm:')) {
+			try {
+				if (interaction.customId === 'rhune:rollconfirm:cancel') {
+					await interaction.update({ content: 'Cancelled.', embeds: [], components: [], flags: 64 });
+					return;
+				}
+
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const mode = parts[parts.length - 1];
+				const moveName = parts.slice(3, -1).join(':');
+
+				const record = await getCharacterById({ id: charId });
+				if (record.guild_id !== interaction.guildId) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
+
+				const { getMoveRollStat, getStatMod, statLabel } = require('./lib/move_rolls');
+				const statKey = getMoveRollStat(moveName);
+				if (!statKey) {
+					await replyEphemeral(interaction, `No roll mapping found for **${moveName}** yet.`);
+					return;
+				}
+
+				const mod = getStatMod(record.stats, statKey);
+				const { roll2d6 } = require('./lib/dice');
+				const { twoD6Embed, withRollId } = require('./lib/format');
+				const { renderPbtaD6Strip } = require('./lib/pbta_roll_strip');
+				const { AttachmentBuilder } = require('discord.js');
+				const { logRoll } = require('./lib/rolllog_pb');
+
+				const result = roll2d6(mode);
+				const rollId = await logRoll({
+					guildId: interaction.guildId,
+					channelId: interaction.channelId,
+					userId: interaction.user.id,
+					commandName: 'move',
+					expr: `2d6${mod >= 0 ? '+' : ''}${mod}`,
+					mode,
+					result: { ...result, modifier: mod, move: moveName, stat: statLabel(statKey) },
+				});
+
+				const embed = withRollId(twoD6Embed(result, mod), rollId)
+					.setTitle(`Move: ${moveName}`)
+					.setDescription(`**${record.name}** rolling +${statLabel(statKey)} (${mod >= 0 ? '+' : ''}${mod})`);
+
+				const buf = await renderPbtaD6Strip({ rolls: result.rolls, droppedIndex: result.droppedIndex ?? null });
+				const fileName = 'pbta-roll.png';
+				const file = new AttachmentBuilder(buf, { name: fileName });
+				embed.setThumbnail(`attachment://${fileName}`);
+
+				// First, update the ephemeral confirmation so it doesn’t linger.
+				await interaction.update({ content: 'Rolled.', embeds: [], components: [], flags: 64 });
+
+				// Then, post the actual roll publicly.
+				await interaction.followUp({ embeds: [embed], files: [file], ephemeral: false });
 			}
 			catch (err) {
 				console.error(err);
