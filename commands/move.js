@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, Butt
 const { moves, categoryNames, getCategoryLabel } = require('../lib/moves_data');
 
 const data = new SlashCommandBuilder()
-	.setName('move')
+	.setName('moves')
 	.setDescription('Look up moves by category')
 	.addSubcommand(sub =>
 		sub.setName('list')
