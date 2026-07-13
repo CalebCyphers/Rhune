@@ -78,6 +78,7 @@ const { replyEphemeral, updateClearComponents, handleError } = require('./lib/in
 const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
+const { moves, getCategoryLabel, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
@@ -272,6 +273,33 @@ client.on(Events.InteractionCreate, async interaction => {
 			}
 			return;
 		}
+		// === Move reference buttons ===
+		// rhune:move:cat:<category> — show category overview + move picker
+		if (interaction.customId.startsWith('rhune:move:cat:')) {
+			try {
+				const category = interaction.customId.slice('rhune:move:cat:'.length);
+				const catMoves = moves[category];
+				if (!catMoves) {
+					await replyEphemeral(interaction, 'Invalid category.');
+					return;
+				}
+
+				const moveNames = Object.keys(catMoves);
+				const embed = new EmbedBuilder()
+					.setTitle(getCategoryLabel(category))
+					.setDescription(`${moveNames.length} move${moveNames.length === 1 ? '' : 's'} — select one from the dropdown below to read its full details.`);
+
+				const pickerRow = buildMovePicker(category);
+				const navRow = buildMoveNav();
+
+				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
 
 		// Edit button: rhune:edit:<charId>
 		if (interaction.customId.startsWith('rhune:edit:')) {
@@ -636,6 +664,58 @@ client.on(Events.InteractionCreate, async interaction => {
 				);
 
 			await interaction.update({ embeds: [embed], components: [navRow, backRow], flags: 64 });
+		}
+		catch (err) {
+			handleError(interaction, err);
+		}
+		return;
+	}
+
+
+	// === Move reference select menus ===
+	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:move:')) {
+		try {
+			// rhune:move:pickcategory — jump to a category
+			if (interaction.customId === 'rhune:move:pickcategory') {
+				const category = interaction.values[0];
+				const catMoves = moves[category];
+				if (!catMoves) {
+					await replyEphemeral(interaction, 'Invalid category.');
+					return;
+				}
+
+				const moveNames = Object.keys(catMoves);
+				const embed = new EmbedBuilder()
+					.setTitle(getCategoryLabel(category))
+					.setDescription(`${moveNames.length} move${moveNames.length === 1 ? '' : 's'} — select one from the dropdown below to read its full details.`);
+
+				const pickerRow = buildMovePicker(category);
+				const navRow = buildMoveNav();
+
+				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
+				return;
+			}
+
+			// rhune:move:pickmove:<category> — show a specific move
+			if (interaction.customId.startsWith('rhune:move:pickmove:')) {
+				const category = interaction.customId.slice('rhune:move:pickmove:'.length);
+				const moveName = interaction.values[0];
+				const moveData = getMove(category, moveName);
+				if (!moveData) {
+					await replyEphemeral(interaction, 'Move not found.');
+					return;
+				}
+
+				const embed = new EmbedBuilder()
+					.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
+					.setDescription(moveData.text.slice(0, 4096));
+
+				const pickerRow = buildMovePicker(category);
+				const navRow = buildMoveNav();
+
+				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
+				return;
+			}
 		}
 		catch (err) {
 			handleError(interaction, err);
