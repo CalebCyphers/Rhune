@@ -298,6 +298,18 @@ module.exports = {
 							.setCustomId(`rhune:playbook:${record.id}`)
 							.setLabel('Playbook')
 							.setStyle(ButtonStyle.Primary),
+						new ButtonBuilder()
+							.setCustomId(`rhune:move:sheet:${record.id}`)
+							.setLabel('Moves')
+							.setStyle(ButtonStyle.Secondary),
+					);
+				}
+				else {
+					row.addComponents(
+						new ButtonBuilder()
+							.setCustomId(`rhune:move:sheet:${record.id}`)
+							.setLabel('Moves')
+							.setStyle(ButtonStyle.Secondary),
 					);
 				}
 
