@@ -10,7 +10,6 @@ const { renderPbtaD6Strip } = require('../lib/pbta_roll_strip');
 
 /** Stat labels for display */
 const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
-const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
 
 /**
  * Build the quick-roll embed + button rows.
@@ -23,7 +22,8 @@ async function buildQuickRollMenu(userId, guildId) {
 		if (charId) {
 			activeChar = await getCharacterById({ id: charId });
 		}
-	} catch {
+	}
+	catch {
 		// No active character — proceed without stats
 	}
 
@@ -110,7 +110,8 @@ async function executeQuickRoll(interaction, mode, statKey = null) {
 					charName = record.name;
 				}
 			}
-		} catch {
+		}
+		catch {
 			// No active char — stat roll without a character just uses 0
 		}
 	}
@@ -171,7 +172,8 @@ async function executeQuickRoll(interaction, mode, statKey = null) {
 			const fileName = 'pbta-roll.png';
 			files.push(new AttachmentBuilder(buf, { name: fileName }));
 			embed.setThumbnail(`attachment://${fileName}`);
-		} catch {
+		}
+		catch {
 			// Image failed — no big deal
 		}
 	}

@@ -228,7 +228,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			try {
 				const parts = interaction.customId.split(':');
 				// rhune:quickroll:flat or rhune:quickroll:flat:adv or rhune:quickroll:stat:str
-				const kind = parts[2]; // 'flat' or 'stat'
+				const kind = parts[2];
 				let mode = 'normal';
 				let statKey = null;
 
@@ -237,7 +237,8 @@ client.on(Events.InteractionCreate, async interaction => {
 					else if (parts[3] === 'dis') mode = 'dis';
 				}
 				else if (kind === 'stat') {
-					statKey = parts[3]; // e.g. 'str', 'dex'
+					// e.g. 'str', 'dex'
+					statKey = parts[3];
 				}
 
 				const result = await executeQuickRoll(interaction, mode, statKey);
