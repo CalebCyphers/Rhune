@@ -11,11 +11,13 @@ const { renderPbtaD6Strip } = require('../lib/pbta_roll_strip');
 /** Stat labels for display */
 const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
 
+// ─── Step 1: Modifier picker ─────────────────────────────────
+
 /**
- * Build the quick-roll embed + button rows.
- * If the user has an active character, buttons include per-stat rolls with their actual modifiers.
+ * Show buttons for choosing flat 2d6 or a stat modifier.
+ * If the user has an active character, buttons display their actual stat values.
  */
-async function buildQuickRollMenu(userId, guildId) {
+async function buildModifierPicker(userId, guildId) {
 	let activeChar = null;
 	try {
 		const charId = await getActiveCharacterId({ guildId, userId });
@@ -29,97 +31,134 @@ async function buildQuickRollMenu(userId, guildId) {
 
 	const embed = new EmbedBuilder()
 		.setColor(0x6b3fa0)
-		.setTitle('🎲 Quick Roll')
-		.setDescription('Pick a roll below, or use `/roll 2d6+<mod>` to roll with a custom modifier.');
+		.setTitle('🎲 Quick Roll — Step 1')
+		.setDescription('Pick what to add to your roll, then choose Normal / Advantage / Disadvantage.');
 
 	const rows = [];
 
-	// Row 1: Flat 2d6 + adv/dis
+	// Row 1: flat 2d6 + stat modifiers
 	const row1 = new ActionRowBuilder();
 	row1.addComponents(
 		new ButtonBuilder()
-			.setCustomId('rhune:quickroll:flat')
+			.setCustomId('rhune:qr:pick:flat')
 			.setLabel('2d6')
 			.setStyle(ButtonStyle.Primary),
-		new ButtonBuilder()
-			.setCustomId('rhune:quickroll:flat:adv')
-			.setLabel('2d6 (adv)')
-			.setStyle(ButtonStyle.Success),
-		new ButtonBuilder()
-			.setCustomId('rhune:quickroll:flat:dis')
-			.setLabel('2d6 (dis)')
-			.setStyle(ButtonStyle.Danger),
 	);
-	rows.push(row1);
 
 	if (activeChar?.stats) {
 		const stats = activeChar.stats;
-
-		// Row 2: STR, DEX, CON
-		const row2 = new ActionRowBuilder();
 		for (const key of ['str', 'dex', 'con']) {
 			const val = stats[key] ?? 0;
-			const label = `${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`;
+			row1.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:qr:pick:stat:${key}`)
+					.setLabel(`${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`)
+					.setStyle(ButtonStyle.Secondary),
+			);
+		}
+	}
+	rows.push(row1);
+
+	// Row 2: remaining stats (if we have a character)
+	if (activeChar?.stats) {
+		const stats = activeChar.stats;
+		const row2 = new ActionRowBuilder();
+		for (const key of ['int', 'wis', 'cha']) {
+			const val = stats[key] ?? 0;
 			row2.addComponents(
 				new ButtonBuilder()
-					.setCustomId(`rhune:quickroll:stat:${key}`)
-					.setLabel(label)
+					.setCustomId(`rhune:qr:pick:stat:${key}`)
+					.setLabel(`${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`)
 					.setStyle(ButtonStyle.Secondary),
 			);
 		}
 		rows.push(row2);
-
-		// Row 3: INT, WIS, CHA
-		const row3 = new ActionRowBuilder();
-		for (const key of ['int', 'wis', 'cha']) {
-			const val = stats[key] ?? 0;
-			const label = `${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`;
-			row3.addComponents(
-				new ButtonBuilder()
-					.setCustomId(`rhune:quickroll:stat:${key}`)
-					.setLabel(label)
-					.setStyle(ButtonStyle.Secondary),
-			);
-		}
-		rows.push(row3);
 	}
+
+	// Cancel row
+	const closeRow = new ActionRowBuilder();
+	closeRow.addComponents(
+		new ButtonBuilder()
+			.setCustomId('rhune:qr:cancel')
+			.setLabel('Cancel')
+			.setStyle(ButtonStyle.Danger),
+	);
+	rows.push(closeRow);
 
 	return { embed, components: rows };
 }
 
+// ─── Step 2: Mode picker ─────────────────────────────────────
+
 /**
- * Execute a quick roll (called from the button handler or directly).
+ * After picking a modifier, show normal/adv/dis buttons + confirm.
  */
-async function executeQuickRoll(interaction, mode, statKey = null) {
+function buildModePicker({ flat, statKey, modifier, statName, charName }) {
+	const label = flat ? '2d6' : `2d6 + ${statName}`;
+	const descParts = [];
+	descParts.push(`Rolling **${label}**`);
+	if (statName && charName) {
+		descParts.push(`**${charName}** — ${statName} modifier: ${modifier > 0 ? '+' : ''}${modifier}`);
+	}
+	descParts.push('');
+	descParts.push('Choose Normal, Advantage, or Disadvantage, then tap **Roll!**');
+
+	const embed = new EmbedBuilder()
+		.setColor(0x6b3fa0)
+		.setTitle(`🎲 ${label}`)
+		.setDescription(descParts.join('\n'));
+
+	const prefix = flat ? 'rhune:qr:confirm:flat' : `rhune:qr:confirm:stat:${statKey}`;
+
+	const modeRow = new ActionRowBuilder();
+	modeRow.addComponents(
+		new ButtonBuilder()
+			.setCustomId(`${prefix}:normal`)
+			.setLabel('Normal')
+			.setStyle(ButtonStyle.Primary),
+		new ButtonBuilder()
+			.setCustomId(`${prefix}:adv`)
+			.setLabel('Advantage')
+			.setStyle(ButtonStyle.Success),
+		new ButtonBuilder()
+			.setCustomId(`${prefix}:dis`)
+			.setLabel('Disadvantage')
+			.setStyle(ButtonStyle.Danger),
+	);
+
+	const navRow = new ActionRowBuilder();
+	navRow.addComponents(
+		new ButtonBuilder()
+			.setCustomId('rhune:qr:back')
+			.setLabel('← Back')
+			.setStyle(ButtonStyle.Secondary),
+		new ButtonBuilder()
+			.setCustomId(`${prefix}:normal`)
+			.setLabel('Roll! ▶')
+			.setStyle(ButtonStyle.Success),
+	);
+
+	return { embed, components: [modeRow, navRow] };
+}
+
+// ─── Execute roll ────────────────────────────────────────────
+
+/**
+ * Execute a quick roll with given options and return the reply payload.
+ * @param {object} interaction
+ * @param {number} modifier — stat modifier (0 for flat)
+ * @param {string} mode — 'normal', 'adv', 'dis'
+ * @param {string|null} statKey — 'str', 'dex', etc., or null for flat
+ * @param {string|null} statName — display name like 'STR', null for flat
+ * @param {string|null} charName — character name for display
+ */
+async function executeQuickRoll(interaction, { modifier, mode, statKey, statName, charName }) {
 	const guildId = interaction.guildId;
 	const userId = interaction.user.id;
-
-	// Determine modifier
-	let modifier = 0;
-	let statName = null;
-	let charName = null;
-
-	if (statKey) {
-		try {
-			const charId = await getActiveCharacterId({ guildId, userId });
-			if (charId) {
-				const record = await getCharacterById({ id: charId });
-				if (record?.stats) {
-					modifier = record.stats[statKey] ?? 0;
-					statName = STAT_LABELS[statKey] || statKey.toUpperCase();
-					charName = record.name;
-				}
-			}
-		}
-		catch {
-			// No active char — stat roll without a character just uses 0
-		}
-	}
 
 	const result = roll2d6(mode);
 	const total = result.total + modifier;
 
-	// Log the roll
 	const exprStr = statKey
 		? `2d6+${modifier} (${statKey})`
 		: `2d6${mode !== 'normal' ? ` ${mode}` : ''}`;
@@ -134,7 +173,6 @@ async function executeQuickRoll(interaction, mode, statKey = null) {
 		result: { ...result, modifier, total },
 	});
 
-	// Build result embed
 	const base = result.kept.reduce((a, b) => a + b, 0);
 
 	let diceLine = result.rolls.join(', ');
@@ -148,7 +186,9 @@ async function executeQuickRoll(interaction, mode, statKey = null) {
 		: `2d6${mode !== 'normal' ? ` (${mode})` : ''}`;
 
 	const descParts = [];
-	if (statName && charName) descParts.push(`**${charName}** — ${statName} modifier: ${modifier > 0 ? '+' : ''}${modifier}`);
+	if (statName && charName) {
+		descParts.push(`**${charName}** — ${statName} modifier: ${modifier > 0 ? '+' : ''}${modifier}`);
+	}
 	if (mode === 'adv') descParts.push('Advantage (3d6 keep best 2)');
 	if (mode === 'dis') descParts.push('Disadvantage (3d6 keep worst 2)');
 
@@ -164,7 +204,6 @@ async function executeQuickRoll(interaction, mode, statKey = null) {
 
 	withRollId(embed, rollId);
 
-	// Build reply with dice image
 	const files = [];
 	if (result.rolls.length >= 2) {
 		try {
@@ -180,6 +219,8 @@ async function executeQuickRoll(interaction, mode, statKey = null) {
 
 	return { embeds: [embed], files };
 }
+
+// ─── Command definition ──────────────────────────────────────
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -209,11 +250,9 @@ module.exports = {
 		const hasExpr = interaction.options.getString('expr') !== null;
 
 		try {
-			// Build a nice response wrapper so we can optionally attach dice images.
 			async function buildReply({ embed, rollResult, rollId }) {
 				const files = [];
 
-				// PbtA: 2d6 (normal) or 3d6 keep 2 (adv/dis)
 				if (rollResult?.type === '2d6' && Array.isArray(rollResult.rolls)) {
 					const buf = await renderPbtaD6Strip({ rolls: rollResult.rolls, droppedIndex: rollResult.droppedIndex ?? null });
 					const fileName = 'pbta-roll.png';
@@ -222,7 +261,6 @@ module.exports = {
 					return { embeds: [withRollId(embed, rollId)], files };
 				}
 
-				// Single die: show an icon for d6/d20.
 				if (rollResult?.type === 'expr' && rollResult.count === 1 && (rollResult.sides === 6 || rollResult.sides === 20)) {
 					const face = rollResult.rolls?.[0];
 					const filePath = diceImagePath({ sides: rollResult.sides, face });
@@ -256,9 +294,9 @@ module.exports = {
 				return;
 			}
 
-			// NEW: If no expression provided, show the Quick Roll menu
+			// No expression → Quick Roll menu (step 1)
 			if (!hasExpr) {
-				const { embed, components } = await buildQuickRollMenu(interaction.user.id, interaction.guildId);
+				const { embed, components } = await buildModifierPicker(interaction.user.id, interaction.guildId);
 				await interaction.reply({
 					embeds: [embed],
 					components,
@@ -267,7 +305,6 @@ module.exports = {
 				return;
 			}
 
-			// Special case: treat a bare 2d6 (with optional +/- modifier) as a PbtA-style roll.
 			const cleaned = String(expr).trim().toLowerCase().replace(/\s+/g, '');
 			const match2d6 = cleaned.match(/^2d6(?<mod>[+-]\d+)?$/);
 			if (match2d6) {
@@ -309,6 +346,8 @@ module.exports = {
 			await interaction.reply({ content: `Could not roll: ${err.message}`, ephemeral: true });
 		}
 	},
-	// Export for use by button handler
+	// Exports for button handler
+	buildModifierPicker,
+	buildModePicker,
 	executeQuickRoll,
 };
