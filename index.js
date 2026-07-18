@@ -82,6 +82,12 @@ const { moves, categoryNames, getCategoryLabel, getMove, buildMoveNav, buildMove
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
+// Import quick-roll helper from the roll command
+const rollCommand = require('./commands/roll');
+
+/** Stat labels for display (shared with roll command) */
+const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+
 /**
  * Build the Edit view embed and components for a character.
  */
@@ -219,6 +225,118 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 	if (interaction.isButton()) {
+		// === Quick Roll buttons: rhune:qr:* ===
+		if (interaction.customId.startsWith('rhune:qr:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				const action = parts[2];
+				// pick, confirm, back, cancel
+
+				// Cancel — dismiss the menu
+				if (action === 'cancel') {
+					await interaction.update({ content: 'Cancelled.', embeds: [], components: [], flags: 64 });
+					return;
+				}
+
+				// Back — return to modifier picker
+				if (action === 'back') {
+					const { embed, components } = await rollCommand.buildModifierPicker(
+						interaction.user.id, interaction.guildId,
+					);
+					await interaction.update({ embeds: [embed], components, flags: 64 });
+					return;
+				}
+
+				// Pick — user chose a modifier, show mode picker
+				if (action === 'pick') {
+					const kind = parts[3];
+					// 'flat' or 'stat'
+					const flat = kind === 'flat';
+					const statKey = flat ? null : parts[4];
+
+					let modifier = 0;
+					let statName = null;
+					let charName = null;
+
+					if (!flat && statKey) {
+						try {
+							const charId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
+							if (charId) {
+								const record = await getCharacterById({ id: charId });
+								if (record?.stats) {
+									modifier = record.stats[statKey] ?? 0;
+									statName = STAT_LABELS[statKey] || statKey.toUpperCase();
+									charName = record.name;
+								}
+							}
+						}
+						catch {
+							// stat roll without active char — modifier stays 0
+						}
+					}
+
+					const { embed, components } = rollCommand.buildModePicker({
+						flat,
+						statKey,
+						modifier,
+						statName,
+						charName,
+					});
+					await interaction.update({ embeds: [embed], components, flags: 64 });
+					return;
+				}
+
+				// Confirm — execute the roll
+				if (action === 'confirm') {
+					const kind = parts[3];
+					// 'flat' or 'stat'
+					const statKey = kind === 'stat' ? parts[4] : null;
+					const mode = kind === 'stat' ? parts[5] : parts[4];
+
+					let modifier = 0;
+					let statName = null;
+					let charName = null;
+
+					if (statKey) {
+						try {
+							const charId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
+							if (charId) {
+								const record = await getCharacterById({ id: charId });
+								if (record?.stats) {
+									modifier = record.stats[statKey] ?? 0;
+									statName = STAT_LABELS[statKey] || statKey.toUpperCase();
+									charName = record.name;
+								}
+							}
+						}
+						catch {
+							// modifier stays 0
+						}
+					}
+
+					const result = await rollCommand.executeQuickRoll(interaction, {
+						modifier,
+						mode,
+						statKey,
+						statName,
+						charName,
+					});
+					await interaction.update({ content: null, embeds: result.embeds, components: [], files: result.files });
+					return;
+				}
+			}
+			catch (err) {
+				console.error('Quick roll error:', err);
+				try {
+					await interaction.update({ content: `Error: ${err.message}`, embeds: [], components: [], flags: 64 });
+				}
+				catch {
+					// swallow
+				}
+			}
+			return;
+		}
+
 		// Playbook button: rhune:playbook:<charId>
 		if (interaction.customId.startsWith('rhune:playbook:')) {
 			try {
