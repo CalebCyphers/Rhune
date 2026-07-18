@@ -82,6 +82,10 @@ const { moves, categoryNames, getCategoryLabel, getMove, buildMoveNav, buildMove
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
+// Import quick-roll helper from the roll command
+const rollCommand = require('./commands/roll');
+const { executeQuickRoll } = rollCommand;
+
 /**
  * Build the Edit view embed and components for a character.
  */
@@ -219,6 +223,38 @@ client.once(Events.ClientReady, async () => {
 
 client.on(Events.InteractionCreate, async interaction => {
 	if (interaction.isButton()) {
+		// === Quick Roll buttons: rhune:quickroll:* ===
+		if (interaction.customId.startsWith('rhune:quickroll:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				// rhune:quickroll:flat or rhune:quickroll:flat:adv or rhune:quickroll:stat:str
+				const kind = parts[2]; // 'flat' or 'stat'
+				let mode = 'normal';
+				let statKey = null;
+
+				if (kind === 'flat') {
+					if (parts[3] === 'adv') mode = 'adv';
+					else if (parts[3] === 'dis') mode = 'dis';
+				}
+				else if (kind === 'stat') {
+					statKey = parts[3]; // e.g. 'str', 'dex'
+				}
+
+				const result = await executeQuickRoll(interaction, mode, statKey);
+				await interaction.update({ content: null, embeds: result.embeds, components: [], files: result.files });
+			}
+			catch (err) {
+				console.error('Quick roll error:', err);
+				try {
+					await interaction.update({ content: `Error: ${err.message}`, embeds: [], components: [], flags: 64 });
+				}
+				catch {
+					// swallow
+				}
+			}
+			return;
+		}
+
 		// Playbook button: rhune:playbook:<charId>
 		if (interaction.customId.startsWith('rhune:playbook:')) {
 			try {

@@ -1,22 +1,195 @@
-const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const { roll2d6, rollExpr } = require('../lib/dice');
 const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
 const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
+const { getActiveCharacterId } = require('../lib/characters_pb');
+const { getCharacterById } = require('../lib/characters_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
 const { renderPbtaD6Strip } = require('../lib/pbta_roll_strip');
+
+/** Stat labels for display */
+const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+const STAT_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
+
+/**
+ * Build the quick-roll embed + button rows.
+ * If the user has an active character, buttons include per-stat rolls with their actual modifiers.
+ */
+async function buildQuickRollMenu(userId, guildId) {
+	let activeChar = null;
+	try {
+		const charId = await getActiveCharacterId({ guildId, userId });
+		if (charId) {
+			activeChar = await getCharacterById({ id: charId });
+		}
+	} catch {
+		// No active character — proceed without stats
+	}
+
+	const embed = new EmbedBuilder()
+		.setColor(0x6b3fa0)
+		.setTitle('🎲 Quick Roll')
+		.setDescription('Pick a roll below, or use `/roll 2d6+<mod>` to roll with a custom modifier.');
+
+	const rows = [];
+
+	// Row 1: Flat 2d6 + adv/dis
+	const row1 = new ActionRowBuilder();
+	row1.addComponents(
+		new ButtonBuilder()
+			.setCustomId('rhune:quickroll:flat')
+			.setLabel('2d6')
+			.setStyle(ButtonStyle.Primary),
+		new ButtonBuilder()
+			.setCustomId('rhune:quickroll:flat:adv')
+			.setLabel('2d6 (adv)')
+			.setStyle(ButtonStyle.Success),
+		new ButtonBuilder()
+			.setCustomId('rhune:quickroll:flat:dis')
+			.setLabel('2d6 (dis)')
+			.setStyle(ButtonStyle.Danger),
+	);
+	rows.push(row1);
+
+	if (activeChar?.stats) {
+		const stats = activeChar.stats;
+
+		// Row 2: STR, DEX, CON
+		const row2 = new ActionRowBuilder();
+		for (const key of ['str', 'dex', 'con']) {
+			const val = stats[key] ?? 0;
+			const label = `${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`;
+			row2.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:quickroll:stat:${key}`)
+					.setLabel(label)
+					.setStyle(ButtonStyle.Secondary),
+			);
+		}
+		rows.push(row2);
+
+		// Row 3: INT, WIS, CHA
+		const row3 = new ActionRowBuilder();
+		for (const key of ['int', 'wis', 'cha']) {
+			const val = stats[key] ?? 0;
+			const label = `${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`;
+			row3.addComponents(
+				new ButtonBuilder()
+					.setCustomId(`rhune:quickroll:stat:${key}`)
+					.setLabel(label)
+					.setStyle(ButtonStyle.Secondary),
+			);
+		}
+		rows.push(row3);
+	}
+
+	return { embed, components: rows };
+}
+
+/**
+ * Execute a quick roll (called from the button handler or directly).
+ */
+async function executeQuickRoll(interaction, mode, statKey = null) {
+	const guildId = interaction.guildId;
+	const userId = interaction.user.id;
+
+	// Determine modifier
+	let modifier = 0;
+	let statName = null;
+	let charName = null;
+
+	if (statKey) {
+		try {
+			const charId = await getActiveCharacterId({ guildId, userId });
+			if (charId) {
+				const record = await getCharacterById({ id: charId });
+				if (record?.stats) {
+					modifier = record.stats[statKey] ?? 0;
+					statName = STAT_LABELS[statKey] || statKey.toUpperCase();
+					charName = record.name;
+				}
+			}
+		} catch {
+			// No active char — stat roll without a character just uses 0
+		}
+	}
+
+	const result = roll2d6(mode);
+	const total = result.total + modifier;
+
+	// Log the roll
+	const exprStr = statKey
+		? `2d6+${modifier} (${statKey})`
+		: `2d6${mode !== 'normal' ? ` ${mode}` : ''}`;
+
+	const rollId = await logRoll({
+		guildId,
+		channelId: interaction.channelId,
+		userId,
+		commandName: 'roll',
+		expr: exprStr,
+		mode,
+		result: { ...result, modifier, total },
+	});
+
+	// Build result embed
+	const base = result.kept.reduce((a, b) => a + b, 0);
+
+	let diceLine = result.rolls.join(', ');
+	if (result.mode !== 'normal' && result.droppedIndex !== null) {
+		const droppedVal = result.rolls[result.droppedIndex];
+		diceLine = `${result.rolls.join(', ')} (dropped ${droppedVal})`;
+	}
+
+	const title = statName
+		? `2d6 + ${statName}`
+		: `2d6${mode !== 'normal' ? ` (${mode})` : ''}`;
+
+	const descParts = [];
+	if (statName && charName) descParts.push(`**${charName}** — ${statName} modifier: ${modifier > 0 ? '+' : ''}${modifier}`);
+	if (mode === 'adv') descParts.push('Advantage (3d6 keep best 2)');
+	if (mode === 'dis') descParts.push('Disadvantage (3d6 keep worst 2)');
+
+	const embed = new EmbedBuilder()
+		.setColor(0x6b3fa0)
+		.setTitle(`🎲 ${title}`)
+		.setDescription(descParts.join('\n'))
+		.addFields(
+			{ name: 'Roll', value: diceLine, inline: true },
+			{ name: 'Base', value: String(base), inline: true },
+			{ name: statName ? `Total (${statName})` : 'Total', value: String(total), inline: true },
+		);
+
+	withRollId(embed, rollId);
+
+	// Build reply with dice image
+	const files = [];
+	if (result.rolls.length >= 2) {
+		try {
+			const buf = await renderPbtaD6Strip({ rolls: result.rolls, droppedIndex: result.droppedIndex ?? null });
+			const fileName = 'pbta-roll.png';
+			files.push(new AttachmentBuilder(buf, { name: fileName }));
+			embed.setThumbnail(`attachment://${fileName}`);
+		} catch {
+			// Image failed — no big deal
+		}
+	}
+
+	return { embeds: [embed], files };
+}
 
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('roll')
-		.setDescription('Roll dice (supports basic expressions like d20, 2d6+1, or 2d6 with adv/dis)')
+		.setDescription('Roll dice (supports basic expressions like d20, 2d6+1)')
 		.addStringOption(option => option
 			.setName('expr')
-			.setDescription('Dice expression (e.g. d20, 2d6+1). If omitted, defaults to 2d6.')
+			.setDescription('Dice expression (e.g. d20, 2d6+1). Leave empty for the Quick Roll menu.')
 			.setRequired(false))
 		.addStringOption(option => option
 			.setName('mode')
-			.setDescription('Advantage/disadvantage: roll one extra die and drop lowest/highest (single die type only)')
+			.setDescription('Advantage/disadvantage: roll one extra die and drop lowest/highest')
 			.setRequired(false)
 			.addChoices(
 				{ name: 'normal', value: 'normal' },
@@ -29,8 +202,9 @@ module.exports = {
 			.setRequired(false)),
 	async execute(interaction) {
 		const showLast = interaction.options.getBoolean('last') || false;
-		const expr = interaction.options.getString('expr') || '2d6';
+		const expr = interaction.options.getString('expr');
 		const mode = interaction.options.getString('mode') || 'normal';
+		const hasExpr = interaction.options.getString('expr') !== null;
 
 		try {
 			// Build a nice response wrapper so we can optionally attach dice images.
@@ -80,6 +254,17 @@ module.exports = {
 				return;
 			}
 
+			// NEW: If no expression provided, show the Quick Roll menu
+			if (!hasExpr) {
+				const { embed, components } = await buildQuickRollMenu(interaction.user.id, interaction.guildId);
+				await interaction.reply({
+					embeds: [embed],
+					components,
+					ephemeral: true,
+				});
+				return;
+			}
+
 			// Special case: treat a bare 2d6 (with optional +/- modifier) as a PbtA-style roll.
 			const cleaned = String(expr).trim().toLowerCase().replace(/\s+/g, '');
 			const match2d6 = cleaned.match(/^2d6(?<mod>[+-]\d+)?$/);
@@ -122,4 +307,6 @@ module.exports = {
 			await interaction.reply({ content: `Could not roll: ${err.message}`, ephemeral: true });
 		}
 	},
+	// Export for use by button handler
+	executeQuickRoll,
 };
