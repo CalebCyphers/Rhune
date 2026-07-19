@@ -268,7 +268,7 @@ async function executeQuickRoll(interaction, { modifier, mode, statKey, statName
 	const embed = new EmbedBuilder()
 		.setColor(0x6b3fa0)
 		.setTitle(`🎲 ${title}`)
-		.setDescription(descParts.join('\n'))
+		.setDescription(descParts.join('\n') || null)
 		.addFields(
 			{ name: 'Roll', value: diceLine, inline: true },
 			{ name: 'Base', value: String(base), inline: true },
