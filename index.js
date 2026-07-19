@@ -266,8 +266,8 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				// Confirm/Roll — execute the roll
-				if (action === 'confirm' || action === 'roll') {
+				// Confirm — execute the roll
+				if (action === 'confirm') {
 					const kind = parts[3];
 					// 'flat' or 'stat'
 					const statKey = kind === 'stat' ? parts[4] : null;

@@ -216,12 +216,6 @@ function buildModePicker({ flat, statKey, modifier, statName, charName }) {
 			.setCustomId('rhune:qr:back')
 			.setLabel('← Back')
 			.setStyle(ButtonStyle.Secondary),
-		// IMPORTANT: custom_id must be unique across all components in the message.
-		// Use a distinct action for the CTA button.
-		new ButtonBuilder()
-			.setCustomId(`${confirmPrefix}:roll`)
-			.setLabel('Roll! ▶')
-			.setStyle(ButtonStyle.Success),
 	);
 
 	return { embed, components: [modeRow, navRow] };
