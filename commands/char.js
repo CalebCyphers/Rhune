@@ -138,37 +138,38 @@ module.exports = {
 				return;
 			}
 
-			if (sub === 'rename') {
+				if (sub === 'rename') {
+				await interaction.deferReply({ flags: 64 });
 				const newName = interaction.options.getString('new_name');
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char rename`.', ephemeral: true });
+					await interaction.editReply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char rename`.' });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
 					setPending(interaction.user.id, { action: 'rename', payload: { newName } });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'rename' }));
+					await interaction.editReply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'rename' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await interaction.editReply({ content: `No character found matching **${record.target}**.` });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await interaction.editReply({ content: 'No active character set.' });
 					return;
 				}
 				if (record.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					await interaction.editReply({ content: 'That character is not from this server.' });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await interaction.editReply({ content: 'You do not own that character.' });
 					return;
 				}
 
 				await renameCharacter({ id: record.id, newName });
-				await interaction.reply({ content: `Renamed character to **${newName}**.`, ephemeral: true });
+				await interaction.editReply({ content: `Renamed character to **${newName}**.` });
 				return;
 			}
 
