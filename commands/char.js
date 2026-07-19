@@ -681,7 +681,7 @@ function buildWizardStep(interaction, step) {
 				poolRow.addComponents(
 					new ButtonBuilder()
 						.setCustomId(`rhune:create:selectpool:${key}`)
-						.setLabel(isSelected ? `▸ ${v}` : v)
+						.setLabel(isSelected ? `▸ ${v}` : String(v))
 						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
 				);
 				count++;
