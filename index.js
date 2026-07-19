@@ -85,9 +85,6 @@ const { pbDiagnostics } = require('./lib/pb_diagnostics');
 // Import quick-roll helper from the roll command
 const rollCommand = require('./commands/roll');
 
-/** Stat labels for display (shared with roll command) */
-const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
-
 /**
  * Build the Edit view embed and components for a character.
  */
@@ -254,26 +251,9 @@ client.on(Events.InteractionCreate, async interaction => {
 					const flat = kind === 'flat';
 					const statKey = flat ? null : parts[4];
 
-					let modifier = 0;
-					let statName = null;
-					let charName = null;
-
-					if (!flat && statKey) {
-						try {
-							const charId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
-							if (charId) {
-								const record = await getCharacterById({ id: charId });
-								if (record?.stats) {
-									modifier = record.stats[statKey] ?? 0;
-									statName = STAT_LABELS[statKey] || statKey.toUpperCase();
-									charName = record.name;
-								}
-							}
-						}
-						catch {
-							// stat roll without active char — modifier stays 0
-						}
-					}
+					const { modifier, statName, charName } = await rollCommand.resolveStatInfo(
+						interaction.user.id, interaction.guildId, statKey,
+					);
 
 					const { embed, components } = rollCommand.buildModePicker({
 						flat,
@@ -293,33 +273,12 @@ client.on(Events.InteractionCreate, async interaction => {
 					const statKey = kind === 'stat' ? parts[4] : null;
 					const mode = kind === 'stat' ? parts[5] : parts[4];
 
-					let modifier = 0;
-					let statName = null;
-					let charName = null;
-
-					if (statKey) {
-						try {
-							const charId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
-							if (charId) {
-								const record = await getCharacterById({ id: charId });
-								if (record?.stats) {
-									modifier = record.stats[statKey] ?? 0;
-									statName = STAT_LABELS[statKey] || statKey.toUpperCase();
-									charName = record.name;
-								}
-							}
-						}
-						catch {
-							// modifier stays 0
-						}
-					}
+					const { modifier, statName, charName } = await rollCommand.resolveStatInfo(
+						interaction.user.id, interaction.guildId, statKey,
+					);
 
 					const result = await rollCommand.executeQuickRoll(interaction, {
-						modifier,
-						mode,
-						statKey,
-						statName,
-						charName,
+						modifier, mode, statKey, statName, charName,
 					});
 					await interaction.update({ content: null, embeds: result.embeds, components: [], files: result.files });
 					return;
@@ -407,6 +366,28 @@ client.on(Events.InteractionCreate, async interaction => {
 		// === Move reference from sheet button ===
 		if (interaction.customId.startsWith('rhune:move:sheet:')) {
 			try {
+				const charId = interaction.customId.slice('rhune:move:sheet:'.length);
+				const record = await getCharacterById({ id: charId });
+
+				// Show character's personal playbook moves if they have a playbook
+				if (record.playbook && lookupPlaybook(record.playbook)) {
+					const embed = renderPlaybookEmbed(record, 'moves');
+					if (embed) {
+						const navRow = buildPlaybookNav(record);
+
+						const browseRow = new ActionRowBuilder().addComponents(
+							new ButtonBuilder()
+								.setCustomId('rhune:move:reference')
+								.setLabel('📖 Browse All Moves')
+								.setStyle(ButtonStyle.Secondary),
+						);
+
+						await interaction.reply({ embeds: [embed], components: [navRow, browseRow], ephemeral: true });
+						return;
+					}
+				}
+
+				// Fallback: no playbook — show full reference
 				const embed = new EmbedBuilder()
 					.setTitle('📖 Move Reference')
 					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
@@ -434,6 +415,43 @@ client.on(Events.InteractionCreate, async interaction => {
 					);
 
 				await interaction.reply({ embeds: [embed], components: [backToCategories], ephemeral: true });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// === Browse full move reference button ===
+		if (interaction.customId === 'rhune:move:reference') {
+			try {
+				const embed = new EmbedBuilder()
+					.setTitle('📖 Move Reference')
+					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
+
+				const rows = categoryNames.map(cat => {
+					const catMoves = moves[cat];
+					const count = Object.keys(catMoves).length;
+					return {
+						name: getCategoryLabel(cat),
+						value: count + ' move' + (count === 1 ? '' : 's'),
+						inline: false,
+					};
+				});
+
+				embed.addFields(rows);
+
+				const backToCategories = new ActionRowBuilder()
+					.addComponents(
+						...categoryNames.map(cat =>
+							new ButtonBuilder()
+								.setCustomId('rhune:move:cat:' + cat)
+								.setLabel(getCategoryLabel(cat))
+								.setStyle(ButtonStyle.Secondary),
+						),
+					);
+
+				await interaction.update({ embeds: [embed], components: [backToCategories], flags: 64 });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -639,7 +657,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					// format: rhune:create:selectpool:<index>:<value>
 					const poolParts = interaction.customId.split(':').slice(3);
 					const poolIndex = parseInt(poolParts[0], 10);
-					const poolVal = poolParts.slice(1).join(':');
+					const poolVal = parseInt(poolParts.slice(1).join(':'), 10);
 					selectPoolValue(wizardId, poolIndex, poolVal);
 					break;
 				}
@@ -656,9 +674,10 @@ client.on(Events.InteractionCreate, async interaction => {
 					advanceStep(wizardId);
 					break;
 				case 'finalize': {
+					await interaction.deferUpdate();
 					const state = getWizard(wizardId);
 					if (!state) {
-						await replyEphemeral(interaction, 'Session expired. Please start again with /char create.');
+						await interaction.editReply({ embeds: [new EmbedBuilder().setDescription('Session expired. Please start again with /char create.')], components: [], flags: 64 });
 						return;
 					}
 
@@ -709,7 +728,6 @@ client.on(Events.InteractionCreate, async interaction => {
 					});
 
 					await setActiveCharacter({ guildId: state.guildId, userId: state.userId, characterId: record.id });
-					clearWizard(wizardId);
 
 					const embed = await renderCharacterSheetEmbed(record);
 
@@ -740,7 +758,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
 					components.push(row);
 
-					await interaction.update({ embeds: [embed], components, flags: 64 });
+					await interaction.editReply({ embeds: [embed], components, flags: 64 });
+					clearWizard(wizardId);
 					return;
 				}
 				case 'cancel':
