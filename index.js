@@ -598,7 +598,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					// format: rhune:create:selectpool:<index>:<value>
 					const poolParts = interaction.customId.split(':').slice(3);
 					const poolIndex = parseInt(poolParts[0], 10);
-					const poolVal = poolParts.slice(1).join(':');
+					const poolVal = parseInt(poolParts.slice(1).join(':'), 10);
 					selectPoolValue(wizardId, poolIndex, poolVal);
 					break;
 				}

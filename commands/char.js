@@ -681,7 +681,7 @@ function buildWizardStep(interaction, step) {
 				poolRow.addComponents(
 					new ButtonBuilder()
 						.setCustomId(`rhune:create:selectpool:${key}`)
-						.setLabel(isSelected ? `▸ ${v}` : String(v))
+						.setLabel(isSelected ? `▸ ${v > 0 ? '+' : ''}${v}` : `${v > 0 ? '+' : ''}${v}`)
 						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
 				);
 				count++;
@@ -703,7 +703,7 @@ function buildWizardStep(interaction, step) {
 			row1.addComponents(
 				new ButtonBuilder()
 					.setCustomId(`rhune:create:assignstat:${k}`)
-					.setLabel(`${statNames[k]} ${isAssigned ? v : '—'}`)
+					.setLabel(`${statNames[k]} ${isAssigned ? (v > 0 ? '+' : '') + v : '—'}`)
 					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
 			);
 		});
@@ -716,7 +716,7 @@ function buildWizardStep(interaction, step) {
 			row2.addComponents(
 				new ButtonBuilder()
 					.setCustomId(`rhune:create:assignstat:${k}`)
-					.setLabel(`${statNames[k]} ${isAssigned ? v : '—'}`)
+					.setLabel(`${statNames[k]} ${isAssigned ? (v > 0 ? '+' : '') + v : '—'}`)
 					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
 			);
 		});
