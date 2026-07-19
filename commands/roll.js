@@ -29,7 +29,7 @@ async function resolveStatInfo(userId, guildId, statKey) {
 		if (charId) {
 			const record = await getCharacterById({ id: charId });
 			if (record?.stats) {
-				modifier = Number(record.stats[statKey]) ?? 0;
+				modifier = Number(record.stats[statKey] ?? 0);
 				charName = record.name;
 			}
 		}
