@@ -139,39 +139,39 @@ module.exports = {
 			}
 
 			if (sub === 'rename') {
-			await interaction.deferReply({ flags: 64 });
-			const newName = interaction.options.getString('new_name');
-			const record = await resolveCharRecord();
-			if (!record) {
-				await interaction.editReply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char rename`.' });
-				return;
-			}
-			if (record.kind === 'ambiguous') {
-				setPending(interaction.user.id, { action: 'rename', payload: { newName } });
-				await interaction.editReply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'rename' }));
-				return;
-			}
-			if (record.kind === 'none') {
-				await interaction.editReply({ content: `No character found matching **${record.target}**.` });
-				return;
-			}
-			if (record.kind === 'missing') {
-				await interaction.editReply({ content: 'No active character set.' });
-				return;
-			}
-			if (record.guild_id !== interaction.guildId) {
-				await interaction.editReply({ content: 'That character is not from this server.' });
-				return;
-			}
-			if (record.owner_user_id !== interaction.user.id) {
-				await interaction.editReply({ content: 'You do not own that character.' });
-				return;
-			}
+				await interaction.deferReply({ flags: 64 });
+				const newName = interaction.options.getString('new_name');
+				const record = await resolveCharRecord();
+				if (!record) {
+					await interaction.editReply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char rename`.' });
+					return;
+				}
+				if (record.kind === 'ambiguous') {
+					setPending(interaction.user.id, { action: 'rename', payload: { newName } });
+					await interaction.editReply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'rename' }));
+					return;
+				}
+				if (record.kind === 'none') {
+					await interaction.editReply({ content: `No character found matching **${record.target}**.` });
+					return;
+				}
+				if (record.kind === 'missing') {
+					await interaction.editReply({ content: 'No active character set.' });
+					return;
+				}
+				if (record.guild_id !== interaction.guildId) {
+					await interaction.editReply({ content: 'That character is not from this server.' });
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await interaction.editReply({ content: 'You do not own that character.' });
+					return;
+				}
 
-			await renameCharacter({ id: record.id, newName });
-			await interaction.editReply({ content: `Renamed character to **${newName}**.` });
-			return;
-		}
+				await renameCharacter({ id: record.id, newName });
+				await interaction.editReply({ content: `Renamed character to **${newName}**.` });
+				return;
+			}
 
 			if (sub === 'delete') {
 				const record = await resolveCharRecord();
