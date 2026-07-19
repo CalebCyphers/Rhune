@@ -366,6 +366,28 @@ client.on(Events.InteractionCreate, async interaction => {
 		// === Move reference from sheet button ===
 		if (interaction.customId.startsWith('rhune:move:sheet:')) {
 			try {
+				const charId = interaction.customId.slice('rhune:move:sheet:'.length);
+				const record = await getCharacterById({ id: charId });
+
+				// Show character's personal playbook moves if they have a playbook
+				if (record.playbook && lookupPlaybook(record.playbook)) {
+					const embed = renderPlaybookEmbed(record, 'moves');
+					if (embed) {
+						const navRow = buildPlaybookNav(record);
+
+						const browseRow = new ActionRowBuilder().addComponents(
+							new ButtonBuilder()
+								.setCustomId('rhune:move:reference')
+								.setLabel('📖 Browse All Moves')
+								.setStyle(ButtonStyle.Secondary),
+						);
+
+						await interaction.reply({ embeds: [embed], components: [navRow, browseRow], ephemeral: true });
+						return;
+					}
+				}
+
+				// Fallback: no playbook — show full reference
 				const embed = new EmbedBuilder()
 					.setTitle('📖 Move Reference')
 					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
@@ -393,6 +415,43 @@ client.on(Events.InteractionCreate, async interaction => {
 					);
 
 				await interaction.reply({ embeds: [embed], components: [backToCategories], ephemeral: true });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// === Browse full move reference button ===
+		if (interaction.customId === 'rhune:move:reference') {
+			try {
+				const embed = new EmbedBuilder()
+					.setTitle('📖 Move Reference')
+					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
+
+				const rows = categoryNames.map(cat => {
+					const catMoves = moves[cat];
+					const count = Object.keys(catMoves).length;
+					return {
+						name: getCategoryLabel(cat),
+						value: count + ' move' + (count === 1 ? '' : 's'),
+						inline: false,
+					};
+				});
+
+				embed.addFields(rows);
+
+				const backToCategories = new ActionRowBuilder()
+					.addComponents(
+						...categoryNames.map(cat =>
+							new ButtonBuilder()
+								.setCustomId('rhune:move:cat:' + cat)
+								.setLabel(getCategoryLabel(cat))
+								.setStyle(ButtonStyle.Secondary),
+						),
+					);
+
+				await interaction.update({ embeds: [embed], components: [backToCategories], flags: 64 });
 			}
 			catch (err) {
 				handleError(interaction, err);
