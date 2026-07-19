@@ -615,9 +615,10 @@ client.on(Events.InteractionCreate, async interaction => {
 					advanceStep(wizardId);
 					break;
 				case 'finalize': {
+					await interaction.deferUpdate();
 					const state = getWizard(wizardId);
 					if (!state) {
-						await replyEphemeral(interaction, 'Session expired. Please start again with /char create.');
+						await interaction.editReply({ embeds: [new EmbedBuilder().setDescription('Session expired. Please start again with /char create.')], components: [], flags: 64 });
 						return;
 					}
 
@@ -668,7 +669,6 @@ client.on(Events.InteractionCreate, async interaction => {
 					});
 
 					await setActiveCharacter({ guildId: state.guildId, userId: state.userId, characterId: record.id });
-					clearWizard(wizardId);
 
 					const embed = await renderCharacterSheetEmbed(record);
 
@@ -699,7 +699,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
 					components.push(row);
 
-					await interaction.update({ embeds: [embed], components, flags: 64 });
+					await interaction.editReply({ embeds: [embed], components, flags: 64 });
+					clearWizard(wizardId);
 					return;
 				}
 				case 'cancel':
