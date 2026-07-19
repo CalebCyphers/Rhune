@@ -29,7 +29,7 @@ async function resolveStatInfo(userId, guildId, statKey) {
 		if (charId) {
 			const record = await getCharacterById({ id: charId });
 			if (record?.stats) {
-				modifier = record.stats[statKey] ?? 0;
+				modifier = Number(record.stats[statKey]) ?? 0;
 				charName = record.name;
 			}
 		}
@@ -134,7 +134,7 @@ async function buildModifierPicker(userId, guildId) {
 			row1.addComponents(
 				new ButtonBuilder()
 					.setCustomId(`rhune:qr:pick:stat:${key}`)
-					.setLabel(`${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`)
+					.setLabel(`${STAT_LABELS[key]} ${Number(val) > 0 ? '+' : ''}${val}`)
 					.setStyle(ButtonStyle.Secondary),
 			);
 		}
@@ -149,7 +149,7 @@ async function buildModifierPicker(userId, guildId) {
 			row2.addComponents(
 				new ButtonBuilder()
 					.setCustomId(`rhune:qr:pick:stat:${key}`)
-					.setLabel(`${STAT_LABELS[key]} ${val > 0 ? '+' : ''}${val}`)
+					.setLabel(`${STAT_LABELS[key]} ${Number(val) > 0 ? '+' : ''}${val}`)
 					.setStyle(ButtonStyle.Secondary),
 			);
 		}
