@@ -85,9 +85,6 @@ const { pbDiagnostics } = require('./lib/pb_diagnostics');
 // Import quick-roll helper from the roll command
 const rollCommand = require('./commands/roll');
 
-/** Stat labels for display (shared with roll command) */
-const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
-
 /**
  * Build the Edit view embed and components for a character.
  */
@@ -254,26 +251,9 @@ client.on(Events.InteractionCreate, async interaction => {
 					const flat = kind === 'flat';
 					const statKey = flat ? null : parts[4];
 
-					let modifier = 0;
-					let statName = null;
-					let charName = null;
-
-					if (!flat && statKey) {
-						try {
-							const charId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
-							if (charId) {
-								const record = await getCharacterById({ id: charId });
-								if (record?.stats) {
-									modifier = record.stats[statKey] ?? 0;
-									statName = STAT_LABELS[statKey] || statKey.toUpperCase();
-									charName = record.name;
-								}
-							}
-						}
-						catch {
-							// stat roll without active char — modifier stays 0
-						}
-					}
+					const { modifier, statName, charName } = await rollCommand.resolveStatInfo(
+						interaction.user.id, interaction.guildId, statKey,
+					);
 
 					const { embed, components } = rollCommand.buildModePicker({
 						flat,
@@ -286,40 +266,19 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				// Confirm — execute the roll
-				if (action === 'confirm') {
+				// Confirm/Roll — execute the roll
+				if (action === 'confirm' || action === 'roll') {
 					const kind = parts[3];
 					// 'flat' or 'stat'
 					const statKey = kind === 'stat' ? parts[4] : null;
 					const mode = kind === 'stat' ? parts[5] : parts[4];
 
-					let modifier = 0;
-					let statName = null;
-					let charName = null;
-
-					if (statKey) {
-						try {
-							const charId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
-							if (charId) {
-								const record = await getCharacterById({ id: charId });
-								if (record?.stats) {
-									modifier = record.stats[statKey] ?? 0;
-									statName = STAT_LABELS[statKey] || statKey.toUpperCase();
-									charName = record.name;
-								}
-							}
-						}
-						catch {
-							// modifier stays 0
-						}
-					}
+					const { modifier, statName, charName } = await rollCommand.resolveStatInfo(
+						interaction.user.id, interaction.guildId, statKey,
+					);
 
 					const result = await rollCommand.executeQuickRoll(interaction, {
-						modifier,
-						mode,
-						statKey,
-						statName,
-						charName,
+						modifier, mode, statKey, statName, charName,
 					});
 					await interaction.update({ content: null, embeds: result.embeds, components: [], files: result.files });
 					return;
