@@ -984,6 +984,6 @@ const server = http.createServer((req, res) => {
 	res.writeHead(200, { 'Content-Type': 'text/plain' });
 	res.end('Rhune bot running');
 });
-server.listen(healthPort, () => {
-	console.log(`Health server listening on port ${healthPort}`);
+server.listen(healthPort, '0.0.0.0', () => {
+	console.log(`Health server listening on 0.0.0.0:${healthPort}`);
 });
