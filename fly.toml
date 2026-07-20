@@ -1,5 +1,6 @@
 # fly.toml for Rhune Discord Bot
 app = "rhune-bot"
+primary_region = "ewr"
 
 [build]
   dockerfile = "Dockerfile"
