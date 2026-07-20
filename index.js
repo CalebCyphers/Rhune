@@ -971,3 +971,19 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 client.login(process.env.BOT_TOKEN);
+
+// Tiny health HTTP server for Fly.io
+const http = require('http');
+const healthPort = process.env.PORT || 8080;
+const server = http.createServer((req, res) => {
+	if (req.url === '/health') {
+		res.writeHead(200, { 'Content-Type': 'text/plain' });
+		res.end('ok');
+		return;
+	}
+	res.writeHead(200, { 'Content-Type': 'text/plain' });
+	res.end('Rhune bot running');
+});
+server.listen(healthPort, () => {
+	console.log(`Health server listening on port ${healthPort}`);
+});
