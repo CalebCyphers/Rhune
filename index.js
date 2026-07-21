@@ -266,7 +266,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				// Confirm — execute the roll
+				// Confirm — execute the roll and send result to channel
 				if (action === 'confirm') {
 					const kind = parts[3];
 					// 'flat' or 'stat'
@@ -280,7 +280,10 @@ client.on(Events.InteractionCreate, async interaction => {
 					const result = await rollCommand.executeQuickRoll(interaction, {
 						modifier, mode, statKey, statName, charName,
 					});
-					await interaction.update({ content: null, embeds: result.embeds, components: [], files: result.files });
+					// Dismiss the ephemeral menu
+					await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
+					// Send the result publicly to the channel
+					await interaction.channel.send({ embeds: result.embeds, files: result.files });
 					return;
 				}
 			}
