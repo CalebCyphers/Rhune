@@ -282,8 +282,18 @@ client.on(Events.InteractionCreate, async interaction => {
 					});
 					// Dismiss the ephemeral menu
 					await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
-					// Send the result publicly to the channel
-					await interaction.channel.send({ embeds: result.embeds, files: result.files });
+
+					// Post publicly only when invoked in a server channel.
+					if (interaction.guildId) {
+						const channel = interaction.channel
+							?? await interaction.client.channels.fetch(interaction.channelId);
+
+						if (!channel?.isTextBased?.()) {
+							throw new Error('Channel is not text-based.');
+						}
+
+						await channel.send({ embeds: result.embeds, files: result.files });
+					}
 					return;
 				}
 			}
