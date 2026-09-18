@@ -17,6 +17,7 @@ const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
 const { disambiguationMessage } = require('../lib/disambiguation');
 const { setPending } = require('../lib/pending_actions');
+const { isGuildOwner } = require('../lib/gm');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -97,6 +98,9 @@ module.exports = {
 				return;
 			}
 
+			// Guild owner = GM. GMs may check & edit any character in the guild.
+			const isGm = await isGuildOwner(interaction, interaction.user.id);
+
 			if (sub === 'create') {
 				const name = interaction.options.getString('name');
 				const playbook = interaction.options.getString('playbook');
@@ -117,6 +121,13 @@ module.exports = {
 
 			if (sub === 'list') {
 				const all = interaction.options.getBoolean('all') || false;
+
+				// Listing all characters in the server is a GM (guild owner) action.
+				if (all && !isGm) {
+					await interaction.reply({ content: 'Only the guild owner can list all characters in this server.', ephemeral: true });
+					return;
+				}
+
 				const chars = await listCharacters({
 					guildId: interaction.guildId,
 					ownerUserId: all ? null : interaction.user.id,
@@ -131,7 +142,9 @@ module.exports = {
 				const lines = chars.map(c => {
 					const activeMark = c.id === activeId ? ' (active)' : '';
 					const playbookText = c.playbook ? ` (${c.playbook})` : '';
-					return `• **${c.name}**${playbookText} — \`${c.id}\`${activeMark}`;
+					// GM list shows who made each character; players just see their own.
+					const ownerText = all && c.owner_user_id ? ` — <@${c.owner_user_id}>` : '';
+					return `• **${c.name}**${playbookText} — \`${c.id}\`${ownerText}${activeMark}`;
 				});
 
 				await interaction.reply({ content: lines.join('\n'), ephemeral: true });
@@ -281,8 +294,8 @@ module.exports = {
 					return;
 				}
 
-				// For now, allow owner-only sheet (bot-private model; can loosen later).
-				if (record.owner_user_id !== interaction.user.id) {
+				// Sheet: owner, or the guild owner (GM) may view any character in the guild.
+				if (record.owner_user_id !== interaction.user.id && !isGm) {
 					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
@@ -368,7 +381,7 @@ module.exports = {
 					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
 					return;
 				}
-				if (record.owner_user_id !== interaction.user.id) {
+				if (record.owner_user_id !== interaction.user.id && !isGm) {
 					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
@@ -427,7 +440,7 @@ module.exports = {
 					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
 					return;
 				}
-				if (record.owner_user_id !== interaction.user.id) {
+				if (record.owner_user_id !== interaction.user.id && !isGm) {
 					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
@@ -466,7 +479,7 @@ module.exports = {
 					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
-				if (record.owner_user_id !== interaction.user.id) {
+				if (record.owner_user_id !== interaction.user.id && !isGm) {
 					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
@@ -498,7 +511,7 @@ module.exports = {
 					await interaction.reply({ content: 'No active character set.', ephemeral: true });
 					return;
 				}
-				if (record.owner_user_id !== interaction.user.id) {
+				if (record.owner_user_id !== interaction.user.id && !isGm) {
 					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
