@@ -70,6 +70,7 @@ const {
 
 const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
+const { upsertInventoryState } = require('./lib/inventory_state_pb');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
@@ -220,6 +221,64 @@ client.once(Events.ClientReady, async () => {
 	client.user.setPresence({ status: mappedStatus });
 
 	console.log(`Bot status set to ${statusType}`);
+});
+
+client.on(Events.MessageCreate, async message => {
+	try {
+		if (!message || message.author?.bot) return;
+		if (!message.guildId) return;
+
+		// Only handle replies.
+		const refId = message.reference?.messageId;
+		if (!refId) return;
+
+		const pending = getPending(message.author.id);
+		if (!pending || pending.action !== 'outfit_save') return;
+
+		// Expired.
+		if (pending.expiresAt && Date.now() > pending.expiresAt) {
+			clearPending(message.author.id);
+			return;
+		}
+
+		// Must match the template message id and channel/guild.
+		if (pending.guildId !== message.guildId) return;
+		if (pending.channelId && pending.channelId !== message.channelId) return;
+		if (pending.templateMessageId !== refId) return;
+
+		const content = String(message.content || '').trim();
+		if (!content.length) {
+			await message.reply('Nothing to save. Please reply with your inventory note text.');
+			return;
+		}
+
+		// Discord hard limit is 2000 chars; be a little conservative.
+		if (content.length > 2000) {
+			await message.reply(`That message is too long to save (${content.length} characters). Please shorten it to 2000 characters or fewer, then reply again.`);
+			return;
+		}
+
+		await upsertInventoryState({
+			characterId: pending.characterId,
+			guildId: message.guildId,
+			inventoryText: content,
+			updatedByUserId: message.author.id,
+		});
+
+		clearPending(message.author.id);
+
+		// Confirmation: regular message reply (ephemeral not possible outside interactions).
+		await message.reply('Saved your inventory note. Check it with `/inv check`. To edit, run `/outfit` again and reply with your updated note.');
+	}
+	catch (err) {
+		// Best-effort: avoid crashing the message handler.
+		try {
+			await message.reply(`Error saving inventory note: ${err.message}`);
+		}
+		catch {
+			// ignore
+		}
+	}
 });
 
 client.on(Events.InteractionCreate, async interaction => {
