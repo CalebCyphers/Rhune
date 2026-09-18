@@ -3,7 +3,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { getCharacterById, getActiveCharacterId } = require('../lib/characters_pb');
 const { setPending } = require('../lib/pending_actions');
 const { getInventoryState } = require('../lib/inventory_state_pb');
-const { replyEphemeral, requireGuild } = require('../lib/interaction_helpers');
+const { replyEphemeral, requireGuild, resolveTextChannel } = require('../lib/interaction_helpers');
 const { buildOutfitTemplate } = require('../lib/inventory_template');
 
 // Discord hard limit.
@@ -62,7 +62,12 @@ module.exports = {
 				`Limits: keep your reply under **${DISCORD_MESSAGE_LIMIT} characters**.\n` +
 				'Tip: you can delete sections you don\'t need.\n\n';
 			const body = template.slice(0, DISCORD_MESSAGE_LIMIT - header.length - 20);
-			const templateMsg = await interaction.channel.send({ content: header + body });
+			const channel = await resolveTextChannel(interaction);
+			if (!channel) {
+				await replyEphemeral(interaction, 'Could not resolve the channel to post the template. Please try again.');
+				return;
+			}
+			const templateMsg = await channel.send({ content: header + body });
 
 			// Store a pending action keyed by user. We only accept replies to this exact message.
 			setPending(interaction.user.id, {
