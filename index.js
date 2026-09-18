@@ -70,7 +70,7 @@ const {
 
 const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
-const { upsertInventoryState } = require('./lib/inventory_state_pb');
+const { upsertInventoryState, getInventoryState } = require('./lib/inventory_state_pb');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
@@ -573,6 +573,40 @@ client.on(Events.InteractionCreate, async interaction => {
 			return;
 		}
 
+
+		// Inventory button: rhune:inventory:<charId>
+		if (interaction.customId.startsWith('rhune:inventory:')) {
+			try {
+				const charId = interaction.customId.slice('rhune:inventory:'.length);
+				const record = await getCharacterById({ id: charId });
+
+				if (record.guild_id !== interaction.guildId) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
+
+				const state = await getInventoryState({ characterId: record.id, guildId: interaction.guildId });
+				const text = state?.inventory_text ? String(state.inventory_text) : null;
+				if (!text) {
+					await replyEphemeral(interaction, `No saved inventory note for **${record.name}** yet. Use /outfit to create one.`);
+					return;
+				}
+				if (text.length > 1900) {
+					await replyEphemeral(interaction, `Your saved inventory note for **${record.name}** is too long to display here. Shorten it via /outfit.`);
+					return;
+				}
+
+				await replyEphemeral(interaction, `**${record.name} — Inventory**\n\n\`\`\`\n${text}\n\`\`\`\n\nEdit: run /outfit again and reply with your updated note.`);
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
 
 		// Edit button: rhune:edit:<charId>
 		if (interaction.customId.startsWith('rhune:edit:')) {

@@ -329,6 +329,10 @@ module.exports = {
 
 				row.addComponents(
 					new ButtonBuilder()
+						.setCustomId(`rhune:inventory:${record.id}`)
+						.setLabel('Inventory')
+						.setStyle(ButtonStyle.Secondary),
+					new ButtonBuilder()
 						.setCustomId(`rhune:edit:${record.id}`)
 						.setLabel('Edit')
 						.setStyle(ButtonStyle.Secondary),
