@@ -238,6 +238,7 @@ client.on(Events.MessageCreate, async message => {
 		// Expired.
 		if (pending.expiresAt && Date.now() > pending.expiresAt) {
 			clearPending(message.author.id);
+			await message.reply('That outfit prompt has expired. Please run `/outfit` again to get a fresh template, then reply to it with your updated inventory note.');
 			return;
 		}
 
