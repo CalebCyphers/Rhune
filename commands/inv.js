@@ -6,10 +6,15 @@ const { replyEphemeral, requireGuild } = require('../lib/interaction_helpers');
 
 async function resolveCharRecord(interaction) {
 	const idOpt = interaction.options.getString('id');
-	if (idOpt) return getCharacterById({ id: idOpt });
+	if (idOpt) {
+		// Guild-scoped: an id from another server resolves to null (fail-closed).
+		const record = await getCharacterById({ id: idOpt, guildId: interaction.guildId });
+		if (!record) return null;
+		return record;
+	}
 	const activeId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
 	if (!activeId) return null;
-	return getCharacterById({ id: activeId });
+	return getCharacterById({ id: activeId, guildId: interaction.guildId });
 }
 
 module.exports = {
