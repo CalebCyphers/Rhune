@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Purpose: command-level tests for commands/inv.js.
+// These focus on "don’t crash" behavior + user-friendly errors for bad inputs,
+// since inv.js touches PocketBase records by id and historically that’s a common
+// production failure mode.
 const { makeInteraction } = require('../helpers');
 
 function stubRequire(id, exportsObj) {

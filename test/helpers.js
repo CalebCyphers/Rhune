@@ -1,5 +1,8 @@
 const assert = require('node:assert/strict');
 
+// Purpose: small test helpers shared across command tests.
+// - makeInteraction(): creates a minimal discord.js-ish interaction stub + captures reply calls.
+// - assertRepliedEphemeral(): ensures replies are ephemeral (either ephemeral:true or flags:64).
 function makeInteraction({
 	guildId = 'guild1',
 	userId = 'user1',

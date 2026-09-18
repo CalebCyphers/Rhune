@@ -1,6 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Purpose: contract tests for lib/characters_pb.js.
+// We mock PocketBase via stubbed runPb() so we can verify:
+//  - correct filter/sort strings
+//  - fail-closed cross-guild behavior
+//  - active-character upsert/clear logic
+// without needing a real PocketBase instance.
 const pbMod = require('../../lib/pb');
 
 function loadCharactersPbFresh() {

@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Purpose: contract tests for lib/inventory_pb.js.
+// We mock PocketBase via stubbed runPb() and (when needed) stub characters_pb.getCharacterById
+// to verify inventory scoping rules and to ensure guildId-based calls fail closed.
 const pbMod = require('../../lib/pb');
 
 function loadInventoryPbFresh() {

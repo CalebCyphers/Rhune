@@ -1,6 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Purpose: unit tests for lib/pb.js's retry/reauth/backoff behavior.
+// This is the "robustness core" for multi-guild + uptime: runPb() must reauth on 401,
+// treat admin-only 403s as a reauth signal (bounded), and back off on transient 5xx.
+//
+// NOTE: runPb() closes over module-scoped getPb()/forceReauth(), so we *don't* mock those
+// by overwriting exports; instead we stub global.fetch to return a fake admin-auth response
+// and let forceReauth() proceed without touching the network.
+
 function loadPbFreshWithEnv() {
 	// pb.js insists on PB_URL during getPb()/forceReauth() if it tries to auth.
 	// For these unit tests we fully stub fetch so it never actually hits network.

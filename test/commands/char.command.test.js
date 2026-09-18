@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+// Purpose: command-level tests for commands/char.js.
+// These simulate Discord interactions (mocked interaction object) and stub all
+// dependent lib modules so we can verify:
+//  - permissions (GM vs owner)
+//  - disambiguation + pending actions
+//  - active character clearing on delete
+//  - correct reply style (ephemeral) and basic message content
 const { makeInteraction, assertRepliedEphemeral } = require('../helpers');
 
 function makeStubs(overrides = {}) {
