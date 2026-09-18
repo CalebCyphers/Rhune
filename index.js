@@ -78,6 +78,7 @@ const { replyEphemeral, updateClearComponents, handleError } = require('./lib/in
 const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
+const { isGuildOwner } = require('./lib/gm');
 const { moves, categoryNames, getCategoryLabel, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
 const { splitIntoChunks, tagPagination } = require('./lib/embed_pager');
 
@@ -847,7 +848,8 @@ client.on(Events.InteractionCreate, async interaction => {
 				await replyEphemeral(interaction, 'That character is not from this server.');
 				return;
 			}
-			if (record.owner_user_id !== interaction.user.id) {
+			const isGm = await isGuildOwner(interaction, interaction.user.id);
+			if (record.owner_user_id !== interaction.user.id && !isGm) {
 				await replyEphemeral(interaction, 'You do not own that character.');
 				return;
 			}
@@ -859,6 +861,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				userId: interaction.user.id,
 				charId: record.id,
 				payload: pending.payload,
+				guildOwnerId: interaction.guild?.ownerId ?? null,
 			});
 			clearPending(interaction.user.id);
 
