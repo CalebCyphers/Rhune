@@ -1,6 +1,9 @@
-const assert = require('assert');
+const assert = require('node:assert/strict');
 
-const { parseDiceExpr, rollExpr, roll2d6, rollFate } = require('../lib/dice');
+// Purpose: lock down dice parsing + bounded roll invariants.
+// This is mostly pure logic (no Discord/PocketBase), so it should stay fast and deterministic
+// except for range checks on random rolls.
+const { parseDiceExpr, rollExpr, roll2d6, rollFate } = require('../../lib/dice');
 
 function assertInRange(n, min, max, msg) {
 	assert.ok(Number.isInteger(n), msg || `Expected integer, got ${n}`);
@@ -35,12 +38,12 @@ function assertInRange(n, min, max, msg) {
 // Roll structure + range tests (non-deterministic, but bounded)
 {
 	const r = rollExpr('2d6+1');
-	assert.strictEqual(r.type, 'expr');
-	assert.strictEqual(r.sides, 6);
-	assert.strictEqual(r.count, 2);
-	assert.strictEqual(r.modifier, 1);
-	assert.strictEqual(r.mode, 'normal');
-	assert.strictEqual(r.rolls.length, 2);
+	assert.equal(r.type, 'expr');
+	assert.equal(r.sides, 6);
+	assert.equal(r.count, 2);
+	assert.equal(r.modifier, 1);
+	assert.equal(r.mode, 'normal');
+	assert.equal(r.rolls.length, 2);
 	r.rolls.forEach(v => assertInRange(v, 1, 6));
 	assertInRange(r.subtotal, 2, 12);
 	assertInRange(r.total, 3, 13);
@@ -48,28 +51,26 @@ function assertInRange(n, min, max, msg) {
 
 {
 	const r = rollExpr('d20', 'adv');
-	assert.strictEqual(r.mode, 'adv');
-	assert.strictEqual(r.rolls.length, 2);
-	assert.strictEqual(r.kept.length, 1);
+	assert.equal(r.mode, 'adv');
+	assert.equal(r.rolls.length, 2);
+	assert.equal(r.kept.length, 1);
 	r.rolls.forEach(v => assertInRange(v, 1, 20));
 	assertInRange(r.total, 1, 20);
 }
 
 {
 	const r = roll2d6('dis');
-	assert.strictEqual(r.type, '2d6');
-	assert.strictEqual(r.mode, 'dis');
-	assert.strictEqual(r.rolls.length, 3);
-	assert.strictEqual(r.kept.length, 2);
+	assert.equal(r.type, '2d6');
+	assert.equal(r.mode, 'dis');
+	assert.equal(r.rolls.length, 3);
+	assert.equal(r.kept.length, 2);
 	r.rolls.forEach(v => assertInRange(v, 1, 6));
 	assertInRange(r.total, 2, 12);
 }
 
 {
 	const r = rollFate();
-	assert.strictEqual(r.type, 'fate');
+	assert.equal(r.type, 'fate');
 	assertInRange(r.roll, 1, 6);
 	assert.ok(['bad', 'mixed', 'good'].includes(r.outcome));
 }
-
-console.log('dice.test.js passed');

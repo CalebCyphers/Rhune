@@ -104,7 +104,16 @@ module.exports = {
 				}
 
 				const item = await getInventoryItemById({ id: itemId });
+				if (!item) {
+					await replyEphemeral(interaction, `Inventory item not found: \`${itemId}\`.`);
+					return;
+				}
+
 				const character = await getCharacterById({ id: item.character_id });
+				if (!character) {
+					await replyEphemeral(interaction, `Could not resolve the character for item \`${itemId}\`.`);
+					return;
+				}
 				if (character.guild_id !== interaction.guildId) {
 					await replyEphemeral(interaction, 'That item belongs to a character from a different server.');
 					return;
@@ -122,7 +131,16 @@ module.exports = {
 			if (sub === 'remove') {
 				const itemId = interaction.options.getString('item_id');
 				const item = await getInventoryItemById({ id: itemId });
+				if (!item) {
+					await replyEphemeral(interaction, `Inventory item not found: \`${itemId}\`.`);
+					return;
+				}
+
 				const character = await getCharacterById({ id: item.character_id });
+				if (!character) {
+					await replyEphemeral(interaction, `Could not resolve the character for item \`${itemId}\`.`);
+					return;
+				}
 				if (character.guild_id !== interaction.guildId) {
 					await replyEphemeral(interaction, 'That item belongs to a character from a different server.');
 					return;
