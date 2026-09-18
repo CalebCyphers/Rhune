@@ -282,26 +282,30 @@ client.on(Events.InteractionCreate, async interaction => {
 						modifier, mode, statKey, statName, charName,
 					});
 
-					// Replace the ephemeral menu with the roll result so the roller always
-					// sees the outcome (Bug #1: previously collapsed to just "✅ Rolled!"
-					// when the public channel.send below failed/weren't visible).
-					await interaction.update({ content: '✅ Rolled!', embeds: result.embeds, files: result.files, components: [], flags: 64 });
-
-					// Best-effort: also post the result publicly in the channel for everyone.
+					// Post the result publicly in the channel for everyone (like /roll exp).
 					if (interaction.guildId) {
-						try {
-							const channel = interaction.channel
-								?? await interaction.client.channels.fetch(interaction.channelId);
+						const channel = interaction.channel
+							?? await interaction.client.channels.fetch(interaction.channelId);
 
-							if (channel?.isTextBased?.()) {
-								await channel.send({ embeds: result.embeds, files: result.files });
-							}
+						if (!channel?.isTextBased?.()) {
+							throw new Error('Channel is not text-based.');
+						}
+
+						try {
+							await channel.send({ embeds: result.embeds, files: result.files });
+							// Public post succeeded: collapse the ephemeral picker menu.
+							await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
 						}
 						catch (err) {
-							// The roller already has the result in their ephemeral reply, so a
-							// public-post failure here shouldn't drop it or error noisily.
+							// Fallback: if the public post fails, show the result to the roller
+							// so they're never left with just "✅ Rolled!" (no Bug #1 regression).
 							console.error('Quick roll public post failed:', err?.message || err);
+							await interaction.update({ content: '✅ Rolled!', embeds: result.embeds, files: result.files, components: [], flags: 64 });
 						}
+					}
+					else {
+						// DMs have no guild/channel to post to publicly — keep it ephemeral.
+						await interaction.update({ content: '✅ Rolled!', embeds: result.embeds, files: result.files, components: [], flags: 64 });
 					}
 					return;
 				}
