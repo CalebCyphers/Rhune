@@ -2,6 +2,7 @@ const { SlashCommandBuilder } = require('discord.js');
 
 const { getCharacterById, getActiveCharacterId } = require('../lib/characters_pb');
 const { listInventory, addInventoryItem, getInventoryItemById, updateInventoryItem, deleteInventoryItem } = require('../lib/inventory_pb');
+const { getInventoryState } = require('../lib/inventory_state_pb');
 const { replyEphemeral, requireGuild } = require('../lib/interaction_helpers');
 
 async function resolveCharRecord(interaction) {
@@ -41,13 +42,45 @@ module.exports = {
 		.addSubcommand(sub => sub
 			.setName('remove')
 			.setDescription('Remove an inventory item by item record id')
-			.addStringOption(opt => opt.setName('item_id').setDescription('Inventory item record id').setRequired(true))),
+			.addStringOption(opt => opt.setName('item_id').setDescription('Inventory item record id').setRequired(true)))
+		.addSubcommand(sub => sub
+			.setName('check')
+			.setDescription('Show your saved Outfit/Inventory note (playbook-style)')
+			.addStringOption(opt => opt.setName('id').setDescription('Character record id (defaults to active)').setRequired(false))),
 
 	async execute(interaction) {
 		const sub = interaction.options.getSubcommand();
 
 		try {
 			requireGuild(interaction);
+
+			if (sub === 'check') {
+				const record = await resolveCharRecord(interaction);
+				if (!record) {
+					await replyEphemeral(interaction, 'No active character set. Use `/char active id:<id>` or pass an id to `/inv check`.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
+
+				const state = await getInventoryState({ characterId: record.id, guildId: interaction.guildId });
+				const text = state?.inventory_text ? String(state.inventory_text) : null;
+				if (!text) {
+					await replyEphemeral(interaction, `No saved inventory note for **${record.name}** yet. Use /outfit to create one.`);
+					return;
+				}
+
+				// Keep within Discord limits; if it's too long, instruct user to shorten.
+				if (text.length > 1900) {
+					await replyEphemeral(interaction, `Your saved inventory note for **${record.name}** is too long to display in an ephemeral message (length ${text.length}).\nConsider shortening it, then re-save via /outfit.`);
+					return;
+				}
+
+				await replyEphemeral(interaction, `**${record.name} — Inventory**\n\n\`\`\`\n${text}\n\`\`\`\n\nEdit: run /outfit again and reply with your updated note.`);
+				return;
+			}
 
 			if (sub === 'list') {
 				const record = await resolveCharRecord(interaction);
