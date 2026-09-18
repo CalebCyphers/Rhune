@@ -79,6 +79,7 @@ const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
 const { moves, categoryNames, getCategoryLabel, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
+const { splitIntoChunks, tagPagination } = require('./lib/embed_pager');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
@@ -280,19 +281,27 @@ client.on(Events.InteractionCreate, async interaction => {
 					const result = await rollCommand.executeQuickRoll(interaction, {
 						modifier, mode, statKey, statName, charName,
 					});
-					// Dismiss the ephemeral menu
-					await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
 
-					// Post publicly only when invoked in a server channel.
+					// Replace the ephemeral menu with the roll result so the roller always
+					// sees the outcome (Bug #1: previously collapsed to just "✅ Rolled!"
+					// when the public channel.send below failed/weren't visible).
+					await interaction.update({ content: '✅ Rolled!', embeds: result.embeds, files: result.files, components: [], flags: 64 });
+
+					// Best-effort: also post the result publicly in the channel for everyone.
 					if (interaction.guildId) {
-						const channel = interaction.channel
-							?? await interaction.client.channels.fetch(interaction.channelId);
+						try {
+							const channel = interaction.channel
+								?? await interaction.client.channels.fetch(interaction.channelId);
 
-						if (!channel?.isTextBased?.()) {
-							throw new Error('Channel is not text-based.');
+							if (channel?.isTextBased?.()) {
+								await channel.send({ embeds: result.embeds, files: result.files });
+							}
 						}
-
-						await channel.send({ embeds: result.embeds, files: result.files });
+						catch (err) {
+							// The roller already has the result in their ephemeral reply, so a
+							// public-post failure here shouldn't drop it or error noisily.
+							console.error('Quick roll public post failed:', err?.message || err);
+						}
 					}
 					return;
 				}
@@ -353,8 +362,8 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = interaction.customId.slice('rhune:playbook:'.length);
 				const record = await getCharacterById({ id: charId });
 
-				const embed = renderPlaybookEmbed(record, 'overview');
-				if (!embed) {
+				const embeds = renderPlaybookEmbed(record, 'overview');
+				if (!embeds) {
 					await replyEphemeral(interaction, 'No playbook info found for this character.');
 					return;
 				}
@@ -368,7 +377,7 @@ client.on(Events.InteractionCreate, async interaction => {
 							.setStyle(ButtonStyle.Secondary),
 					);
 
-				await interaction.reply({ embeds: [embed], components: [navRow, backRow], ephemeral: true });
+				await interaction.reply({ embeds, components: [navRow, backRow], ephemeral: true });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -384,8 +393,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
 				// Show character's personal playbook moves if they have a playbook
 				if (record.playbook && lookupPlaybook(record.playbook)) {
-					const embed = renderPlaybookEmbed(record, 'moves');
-					if (embed) {
+					const embeds = renderPlaybookEmbed(record, 'moves');
+					if (embeds) {
 						const navRow = buildPlaybookNav(record);
 
 						const browseRow = new ActionRowBuilder().addComponents(
@@ -395,7 +404,7 @@ client.on(Events.InteractionCreate, async interaction => {
 								.setStyle(ButtonStyle.Secondary),
 						);
 
-						await interaction.reply({ embeds: [embed], components: [navRow, browseRow], ephemeral: true });
+						await interaction.reply({ embeds, components: [navRow, browseRow], ephemeral: true });
 						return;
 					}
 				}
@@ -876,8 +885,8 @@ client.on(Events.InteractionCreate, async interaction => {
 			const record = await getCharacterById({ id: charId });
 
 
-			const embed = renderPlaybookEmbed(record, section);
-			if (!embed) {
+			const embeds = renderPlaybookEmbed(record, section);
+			if (!embeds) {
 				await replyEphemeral(interaction, 'No playbook info found for this character.');
 				return;
 			}
@@ -891,7 +900,7 @@ client.on(Events.InteractionCreate, async interaction => {
 						.setStyle(ButtonStyle.Secondary),
 				);
 
-			await interaction.update({ embeds: [embed], components: [navRow, backRow], flags: 64 });
+			await interaction.update({ embeds, components: [navRow, backRow], flags: 64 });
 		}
 		catch (err) {
 			handleError(interaction, err);
@@ -934,14 +943,19 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				const embed = new EmbedBuilder()
-					.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
-					.setDescription(moveData.text.slice(0, 4096));
+				const chunks = splitIntoChunks(moveData.text || '');
+				const embeds = chunks.map((chunk, i) => {
+					const e = new EmbedBuilder()
+						.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
+						.setDescription(chunk);
+					tagPagination(e, `${getCategoryLabel(category)} — ${moveName}`, i, chunks.length);
+					return e;
+				});
 
 				const pickerRow = buildMovePicker(category);
 				const navRow = buildMoveNav();
 
-				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
+				await interaction.update({ embeds, components: [pickerRow, navRow].filter(Boolean), flags: 64 });
 				return;
 			}
 		}
