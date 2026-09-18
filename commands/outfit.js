@@ -50,18 +50,19 @@ module.exports = {
 			}
 
 			const useCurrent = interaction.options.getBoolean('use_current') || false;
-			let template = buildOutfitTemplate({ characterName: record.name });
+			let template = buildOutfitTemplate();
 			if (useCurrent) {
 				const current = await getInventoryState({ characterId: record.id, guildId: interaction.guildId });
 				if (current?.inventory_text) template = String(current.inventory_text);
 			}
 
 			// Post a normal message to the channel so the user can reply.
-			const header = `**Outfit: ${record.name}**\nReply to *this message* with your edited inventory note to save.\n\n` +
+			// Template is plain Discord markdown (no code block).
+			const header = 'Reply to *this message* with your edited inventory note to save.\n' +
 				`Limits: keep your reply under **${DISCORD_MESSAGE_LIMIT} characters**.\n` +
-				'Tip: you can delete sections you don\'t need.';
-			const body = '```\n' + template.slice(0, DISCORD_MESSAGE_LIMIT - 10) + '\n```';
-			const templateMsg = await interaction.channel.send({ content: header + '\n' + body });
+				'Tip: you can delete sections you don\'t need.\n\n';
+			const body = template.slice(0, DISCORD_MESSAGE_LIMIT - header.length - 20);
+			const templateMsg = await interaction.channel.send({ content: header + body });
 
 			// Store a pending action keyed by user. We only accept replies to this exact message.
 			setPending(interaction.user.id, {
