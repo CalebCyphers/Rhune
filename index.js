@@ -268,6 +268,17 @@ client.on(Events.MessageCreate, async message => {
 
 		clearPending(message.author.id);
 
+		// Clean up the bot's own template message so a chain of inventory
+		// messages isn't left behind in the channel. Best-effort: never block
+		// the actual save if deletion fails (e.g. missing permission).
+		try {
+			const templateMsg = await message.channel?.messages.fetch(pending.templateMessageId);
+			if (templateMsg) await templateMsg.delete();
+		}
+		catch {
+			// Ignore — save already succeeded; just leave the template in place.
+		}
+
 		// Confirmation: regular message reply (ephemeral not possible outside interactions).
 		await message.reply('Saved your inventory note. Check it with `/inv check`. To edit, run `/outfit` again and reply with your updated note.');
 	}
