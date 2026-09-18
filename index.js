@@ -536,7 +536,15 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = parts[2];
 				const delta = parts[3] === '+' ? 1 : -1;
 
-				const record = await getCharacterById({ id: charId });
+				const record = await getCharacterById({ id: charId, guildId: interaction.guildId });
+				if (!record) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
 				const current = typeof record.hp === 'number' ? record.hp : 0;
 				const newHp = Math.max(0, Math.min(record.hp_max ?? current, current + delta));
 
@@ -560,7 +568,15 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = parts[2];
 				const delta = parts[3] === '+' ? 1 : -1;
 
-				const record = await getCharacterById({ id: charId });
+				const record = await getCharacterById({ id: charId, guildId: interaction.guildId });
+				if (!record) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
 				const current = typeof record.xp === 'number' ? record.xp : 0;
 				const newXp = Math.max(0, current + delta);
 
@@ -583,7 +599,15 @@ client.on(Events.InteractionCreate, async interaction => {
 				const charId = parts[2];
 				const debilName = parts.slice(3).join(':');
 
-				const record = await getCharacterById({ id: charId });
+				const record = await getCharacterById({ id: charId, guildId: interaction.guildId });
+				if (!record) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
+					return;
+				}
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
+					return;
+				}
 				let debils = Array.isArray(record.debilities)
 					? record.debilities.filter(Boolean)
 					: [];
