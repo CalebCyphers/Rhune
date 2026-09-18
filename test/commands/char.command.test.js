@@ -48,7 +48,10 @@ function makeStubs(overrides = {}) {
 			resolveCharacterTarget: async (args) => { calls.resolveCharacterTarget.push(args); return overrides.resolveCharacterTarget?.(args) ?? { kind: 'none', target: args.target }; },
 		},
 		disambiguation: {
-			disambiguationMessage: (args) => { calls.disambiguationMessage.push(args); return { content: `ambiguous:${args.action}` , ephemeral: true }; },
+			disambiguationMessage: (args) => {
+				calls.disambiguationMessage.push(args);
+				return { content: `ambiguous:${args.action}`, ephemeral: true };
+			},
 		},
 		pending_actions: {
 			setPending: (userId, payload) => { calls.setPending.push({ userId, payload }); },
@@ -81,11 +84,13 @@ async function loadCharCommandWithStubs(stubs) {
 	restores.push(stubRequire('../../lib/pending_actions', stubs.pending_actions));
 	restores.push(stubRequire('../../lib/gm', stubs.gm));
 
-	// not used in these tests, but required by module
+	// Not used in these tests, but required by module.
+	// eslint: we use a no-op function to satisfy the import contract.
+	const noop = () => undefined;
 	restores.push(stubRequire('../../lib/create_wizard', {
-		startWizard: () => {},
+		startWizard: noop,
 		getStepInfo: () => ({ type: 'playbook_picker', backgrounds: [], instincts: [], pool: [], poolKeys: [], stats: { str: null, dex: null, con: null, int: null, wis: null, cha: null }, allAssigned: false }),
-		selectPlaybook: () => {},
+		selectPlaybook: noop,
 	}));
 	restores.push(stubRequire('../../lib/conditions_pb', { addCondition: async () => ({}), removeCondition: async () => ({ deleted: 0 }) }));
 
