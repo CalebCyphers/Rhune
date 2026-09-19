@@ -611,7 +611,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				await replyEphemeral(interaction, `**${record.name} — Inventory**\n\n\`\`\`\n${text}\n\`\`\`\n\nEdit: run /outfit again and reply with your updated note.`);
+				await replyEphemeral(interaction, `**${record.name} — Inventory**\n\n${text}\n\nEdit: run /outfit again and reply with your updated note.`);
 			}
 			catch (err) {
 				handleError(interaction, err);
