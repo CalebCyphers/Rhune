@@ -966,6 +966,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				userId: interaction.user.id,
 				charId: record.id,
 				payload: pending.payload,
+				isGM,
 				guildOwnerId: interaction.guild?.ownerId ?? null,
 			});
 			clearPending(interaction.user.id);
