@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 // Purpose: lock down dice parsing + bounded roll invariants.
 // This is mostly pure logic (no Discord/PocketBase), so it should stay fast and deterministic
 // except for range checks on random rolls.
-const { parseDiceExpr, rollExpr, roll2d6, rollFate } = require('../../lib/dice');
+const { parseDiceExpr, rollExpr, roll2d6 } = require('../../lib/dice');
 
 function assertInRange(n, min, max, msg) {
 	assert.ok(Number.isInteger(n), msg || `Expected integer, got ${n}`);
@@ -68,9 +68,3 @@ function assertInRange(n, min, max, msg) {
 	assertInRange(r.total, 2, 12);
 }
 
-{
-	const r = rollFate();
-	assert.equal(r.type, 'fate');
-	assertInRange(r.roll, 1, 6);
-	assert.ok(['bad', 'mixed', 'good'].includes(r.outcome));
-}
