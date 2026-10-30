@@ -1,61 +1,35 @@
 const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-const { roll2d6, rollExpr } = require('../lib/dice');
-const { exprResultEmbed, twoD6Embed, withRollId } = require('../lib/format');
+const { rollPool, poolFromRolls, rollExpr, rollCommunity, POOL_MAX } = require('../lib/dice');
+const { exprResultEmbed, poolEmbed, communityEmbed, withRollId } = require('../lib/format');
 const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
-const { getActiveCharacterId } = require('../lib/characters_pb');
-const { getCharacterById } = require('../lib/characters_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
-const { renderPbtaD6Strip } = require('../lib/pbta_roll_strip');
+const { renderD6Strip } = require('../lib/pool_strip');
 
-/** Stat labels for display */
-const STAT_LABELS = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
+const MODE_CHOICES = [
+	{ name: 'normal', value: 'normal' },
+	{ name: 'advantage', value: 'adv' },
+	{ name: 'disadvantage', value: 'dis' },
+];
 
-/**
- * Look up a user's active character stats and return formatted info.
- * All fields are null-safe for when there's no active character.
- */
-async function resolveStatInfo(userId, guildId, statKey) {
-	let modifier = 0;
-	const statName = STAT_LABELS[statKey] || statKey?.toUpperCase();
-	let charName = null;
-
-	if (!statKey) {
-		return { modifier: 0, statName: null, charName: null };
-	}
-
-	try {
-		const charId = await getActiveCharacterId({ guildId, userId });
-		if (charId) {
-			const record = await getCharacterById({ id: charId });
-			if (record?.stats) {
-				modifier = Number(record.stats[statKey] ?? 0);
-				charName = record.name;
-			}
-		}
-	}
-	catch {
-		// no active character or lookup failure — use 0
-	}
-
-	return { modifier, statName, charName };
-}
+// ─── Attachments ─────────────────────────────────────────────
 
 /**
- * Add dice images to a reply payload when the roll result supports them.
- * Mutates the embed with a thumbnail attachment, returns the files array.
+ * Attach the color-coded d6 strip for a pool or community roll, or a single
+ * d6/d20 face image for a simple expression.
  */
-async function buildDiceAttachments(rollResult, embed) {
+async function buildDiceAttachments(result, embed) {
 	const files = [];
 
-	if (rollResult?.type === '2d6' && Array.isArray(rollResult.rolls)) {
+	if (result?.type === 'pool' || result?.type === 'community') {
 		try {
-			const buf = await renderPbtaD6Strip({
-				rolls: rollResult.rolls,
-				droppedIndex: rollResult.droppedIndex ?? null,
+			const buf = await renderD6Strip({
+				rolls: result.rolls,
+				droppedIndex: result.droppedIndex ?? null,
+				resultIndex: result.type === 'community' ? result.resultIndex : null,
 			});
-			files.push(new AttachmentBuilder(buf, { name: 'pbta-roll.png' }));
-			embed.setThumbnail('attachment://pbta-roll.png');
+			files.push(new AttachmentBuilder(buf, { name: 'roll.png' }));
+			embed.setImage('attachment://roll.png');
 		}
 		catch {
 			// image rendering failure — skip
@@ -64,14 +38,14 @@ async function buildDiceAttachments(rollResult, embed) {
 	}
 
 	if (
-		rollResult?.type === 'expr'
-		&& rollResult.count === 1
-		&& (rollResult.sides === 6 || rollResult.sides === 20)
+		result?.type === 'expr'
+		&& result.count === 1
+		&& (result.sides === 6 || result.sides === 20)
 	) {
 		try {
-			const face = rollResult.rolls?.[0];
-			const filePath = diceImagePath({ sides: rollResult.sides, face });
-			const fileName = diceImageName({ sides: rollResult.sides, face });
+			const face = result.rolls?.[0];
+			const filePath = diceImagePath({ sides: result.sides, face });
+			const fileName = diceImageName({ sides: result.sides, face });
 			if (filePath && fileName) {
 				files.push(new AttachmentBuilder(filePath, { name: fileName }));
 				embed.setThumbnail(`attachment://${fileName}`);
@@ -85,295 +59,259 @@ async function buildDiceAttachments(rollResult, embed) {
 	return files;
 }
 
-/**
- * Build the final reply payload for any roll result.
- * Shared by both the quick-roll flow and the raw /roll expr path.
- */
-async function buildReply(embed, rollResult, rollId) {
-	const files = await buildDiceAttachments(rollResult, embed);
-	return { embeds: [withRollId(embed, rollId)], files };
+async function buildReply(embed, result, rollId, components = []) {
+	const files = await buildDiceAttachments(result, embed);
+	const payload = { embeds: [withRollId(embed, rollId)], files };
+	if (components.length) payload.components = components;
+	return payload;
 }
 
-// ─── Step 1: Modifier picker ─────────────────────────────────
+// ─── Reroll buttons (stateless: the dice live in the customId) ─
+
+/** Encode a set of dice faces into a customId-safe string. */
+function encodeRolls(rolls) {
+	return rolls.join('-');
+}
+
+function decodeRolls(s) {
+	return String(s).split('-').map(v => Number.parseInt(v, 10)).filter(v => Number.isInteger(v));
+}
 
 /**
- * Show buttons for choosing flat 2d6 or a stat modifier.
- * If the user has an active character, buttons display their actual stat values.
+ * Reroll buttons for a pool roll. Only shown for normal-mode pools, since the
+ * bust reroll is about the dice showing 1.
  */
-async function buildModifierPicker(userId, guildId) {
-	let activeChar = null;
-	try {
-		const charId = await getActiveCharacterId({ guildId, userId });
-		if (charId) {
-			activeChar = await getCharacterById({ id: charId });
-		}
+function rerollButtons(result) {
+	if (result.mode !== 'normal') return [];
+	const row = new ActionRowBuilder();
+	if (result.ones > 0) {
+		row.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:rr:ones:${encodeRolls(result.kept)}`)
+				.setLabel('↻ Reroll the 1s')
+				.setStyle(ButtonStyle.Primary),
+		);
 	}
-	catch {
-		// no active character — proceed without stats
-	}
+	row.addComponents(
+		new ButtonBuilder()
+			.setCustomId(`rhune:rr:all:${result.count}:${result.mode}`)
+			.setLabel('↻ Reroll all')
+			.setStyle(ButtonStyle.Secondary),
+	);
+	return [row];
+}
 
+// ─── Quick menu ──────────────────────────────────────────────
+
+function buildQuickMenu(mode = 'normal') {
+	const modeLabel = mode === 'adv' ? ' — Advantage' : mode === 'dis' ? ' — Disadvantage' : '';
 	const embed = new EmbedBuilder()
 		.setColor(0x6b3fa0)
-		.setTitle('🎲 Quick Roll — Step 1')
-		.setDescription('Pick what to add to your roll, then choose Normal / Advantage / Disadvantage.');
-
-	const rows = [];
+		.setTitle(`🎲 Push Your Luck${modeLabel}`)
+		.setDescription('Pick your pool size — your pool starts at **1** and grows by 1 for each risky move this turn.');
 
 	const row1 = new ActionRowBuilder();
-	row1.addComponents(
+	for (let n = 1; n <= 5; n++) {
+		row1.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:qr:pool:${n}:${mode}`)
+				.setLabel(`${n}d6`)
+				.setStyle(ButtonStyle.Primary),
+		);
+	}
+	const row2 = new ActionRowBuilder();
+	row2.addComponents(
 		new ButtonBuilder()
-			.setCustomId('rhune:qr:pick:flat')
-			.setLabel('2d6')
+			.setCustomId(`rhune:qr:pool:6:${mode}`)
+			.setLabel('6d6')
 			.setStyle(ButtonStyle.Primary),
-	);
-
-	if (activeChar?.stats) {
-		const stats = activeChar.stats;
-		for (const key of ['str', 'dex', 'con']) {
-			const val = stats[key] ?? 0;
-			row1.addComponents(
-				new ButtonBuilder()
-					.setCustomId(`rhune:qr:pick:stat:${key}`)
-					.setLabel(`${STAT_LABELS[key]} ${Number(val) > 0 ? '+' : ''}${val}`)
-					.setStyle(ButtonStyle.Secondary),
-			);
-		}
-	}
-	rows.push(row1);
-
-	if (activeChar?.stats) {
-		const stats = activeChar.stats;
-		const row2 = new ActionRowBuilder();
-		for (const key of ['int', 'wis', 'cha']) {
-			const val = stats[key] ?? 0;
-			row2.addComponents(
-				new ButtonBuilder()
-					.setCustomId(`rhune:qr:pick:stat:${key}`)
-					.setLabel(`${STAT_LABELS[key]} ${Number(val) > 0 ? '+' : ''}${val}`)
-					.setStyle(ButtonStyle.Secondary),
-			);
-		}
-		rows.push(row2);
-	}
-
-	const closeRow = new ActionRowBuilder();
-	closeRow.addComponents(
+		new ButtonBuilder()
+			.setCustomId('rhune:qr:menu:adv')
+			.setLabel('Advantage')
+			.setStyle(mode === 'adv' ? ButtonStyle.Success : ButtonStyle.Secondary),
+		new ButtonBuilder()
+			.setCustomId('rhune:qr:menu:dis')
+			.setLabel('Disadvantage')
+			.setStyle(mode === 'dis' ? ButtonStyle.Danger : ButtonStyle.Secondary),
+		new ButtonBuilder()
+			.setCustomId('rhune:qr:menu:normal')
+			.setLabel('Reset')
+			.setStyle(ButtonStyle.Secondary),
 		new ButtonBuilder()
 			.setCustomId('rhune:qr:cancel')
 			.setLabel('Cancel')
-			.setStyle(ButtonStyle.Danger),
-	);
-	rows.push(closeRow);
-
-	return { embed, components: rows };
-}
-
-// ─── Step 2: Mode picker ─────────────────────────────────────
-
-/**
- * After picking a modifier, show normal/adv/dis buttons + confirm.
- */
-function buildModePicker({ flat, statKey, modifier, statName, charName }) {
-	const label = flat ? '2d6' : `2d6 + ${statName}`;
-	const descParts = [
-		`Rolling **${label}**`,
-	];
-	if (statName && charName) {
-		descParts.push(
-			`**${charName}** — ${statName} modifier: ${modifier > 0 ? '+' : ''}${modifier}`,
-		);
-	}
-	descParts.push('', 'Choose Normal, Advantage, or Disadvantage, then tap **Roll!**');
-
-	const embed = new EmbedBuilder()
-		.setColor(0x6b3fa0)
-		.setTitle(`🎲 ${label}`)
-		.setDescription(descParts.join('\n'));
-
-	const confirmPrefix = flat
-		? 'rhune:qr:confirm:flat'
-		: `rhune:qr:confirm:stat:${statKey}`;
-
-	const modeRow = new ActionRowBuilder();
-	modeRow.addComponents(
-		new ButtonBuilder()
-			.setCustomId(`${confirmPrefix}:normal`)
-			.setLabel('Normal')
-			.setStyle(ButtonStyle.Primary),
-		new ButtonBuilder()
-			.setCustomId(`${confirmPrefix}:adv`)
-			.setLabel('Advantage')
-			.setStyle(ButtonStyle.Success),
-		new ButtonBuilder()
-			.setCustomId(`${confirmPrefix}:dis`)
-			.setLabel('Disadvantage')
-			.setStyle(ButtonStyle.Danger),
-	);
-
-	const navRow = new ActionRowBuilder();
-	navRow.addComponents(
-		new ButtonBuilder()
-			.setCustomId('rhune:qr:back')
-			.setLabel('← Back')
 			.setStyle(ButtonStyle.Secondary),
 	);
 
-	return { embed, components: [modeRow, navRow] };
-}
-
-// ─── Execute roll ────────────────────────────────────────────
-
-/**
- * Execute a quick roll with given options and return the reply payload.
- */
-async function executeQuickRoll(interaction, { modifier, mode, statKey, statName, charName }) {
-	const { guildId, channelId } = interaction;
-	const userId = interaction.user.id;
-
-	const result = roll2d6(mode);
-	const total = result.total + modifier;
-
-	const exprStr = statKey
-		? `2d6+${modifier} (${statKey})`
-		: `2d6${mode !== 'normal' ? ` ${mode}` : ''}`;
-
-	const rollId = await logRoll({
-		guildId,
-		channelId,
-		userId,
-		commandName: 'roll',
-		expr: exprStr,
-		mode,
-		result: { ...result, modifier, total },
-	});
-
-	const base = result.kept.reduce((a, b) => a + b, 0);
-
-	let diceLine = result.rolls.join(', ');
-	if (result.mode !== 'normal' && result.droppedIndex !== null) {
-		diceLine = `${result.rolls.join(', ')} (dropped ${result.rolls[result.droppedIndex]})`;
-	}
-
-	const title = statName
-		? `2d6 + ${statName}`
-		: `2d6${mode !== 'normal' ? ` (${mode})` : ''}`;
-
-	const descParts = [];
-	if (statName && charName) {
-		descParts.push(`**${charName}** — ${statName} modifier: ${modifier > 0 ? '+' : ''}${modifier}`);
-	}
-	if (mode === 'adv') descParts.push('Advantage (3d6 keep best 2)');
-	if (mode === 'dis') descParts.push('Disadvantage (3d6 keep worst 2)');
-
-	const embed = new EmbedBuilder()
-		.setColor(0x6b3fa0)
-		.setTitle(`🎲 ${title}`)
-		.setDescription(descParts.join('\n') || null)
-		.addFields(
-			{ name: 'Roll', value: diceLine, inline: true },
-			{ name: 'Base', value: String(base), inline: true },
-			{ name: statName ? `Total (${statName})` : 'Total', value: String(total), inline: true },
-		);
-
-	return buildReply(embed, { ...result, type: '2d6' }, rollId);
+	return { embed, components: [row1, row2] };
 }
 
 // ─── Command definition ──────────────────────────────────────
 
+/**
+ * Roll a pool (fresh, or from a provided set of kept dice), log it, and post
+ * the result to the channel. Shared by the quick menu and the reroll buttons.
+ */
+async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls = null }) {
+	const result = keptRolls
+		? poolFromRolls(keptRolls, { count: keptRolls.length, mode: 'normal' })
+		: rollPool({ count, mode });
+
+	const rollId = await logRoll({
+		guildId: interaction.guildId,
+		channelId: interaction.channelId,
+		userId: interaction.user.id,
+		commandName: 'roll',
+		expr: `pool:${result.count}${result.mode !== 'normal' ? ` ${result.mode}` : ''}`,
+		mode: result.mode,
+		result,
+	});
+
+	const payload = await buildReply(poolEmbed(result), result, rollId, rerollButtons(result));
+
+	if (interaction.guildId) {
+		const channel = interaction.channel
+			?? await interaction.client.channels.fetch(interaction.channelId);
+		if (!channel?.isTextBased?.()) throw new Error('Channel is not text-based.');
+		try {
+			await channel.send(payload);
+			await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
+		}
+		catch (err) {
+			console.error('Pool roll public post failed:', err?.message || err);
+			await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+		}
+	}
+	else {
+		await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+	}
+	return result;
+}
+
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('roll')
-		.setDescription('Roll dice (supports basic expressions like d20, 2d6+1)')
+		.setDescription('Roll dice — a push-your-luck pool, a plain expression, or a community roll')
+		.addIntegerOption(option => option
+			.setName('pool')
+			.setDescription('Push your luck: roll this many d6 (your pool size)')
+			.setRequired(false)
+			.setMinValue(1)
+			.setMaxValue(POOL_MAX))
 		.addStringOption(option => option
 			.setName('expr')
-			.setDescription('Dice expression (e.g. d20, 2d6+1). Leave empty for the Quick Roll menu.')
+			.setDescription('A plain dice expression (e.g. d20, 2d6+1)')
 			.setRequired(false))
+		.addIntegerOption(option => option
+			.setName('community')
+			.setDescription('Community roll: roll this many d6, take the highest (0 = broken: 2d6, lowest)')
+			.setRequired(false)
+			.setMinValue(0)
+			.setMaxValue(POOL_MAX))
 		.addStringOption(option => option
 			.setName('mode')
-			.setDescription('Advantage/disadvantage: roll one extra die and drop lowest/highest')
+			.setDescription('Advantage/disadvantage (extra die, drop lowest/highest)')
 			.setRequired(false)
-			.addChoices(
-				{ name: 'normal', value: 'normal' },
-				{ name: 'adv', value: 'adv' },
-				{ name: 'dis', value: 'dis' },
-			))
+			.addChoices(...MODE_CHOICES))
 		.addBooleanOption(option => option
 			.setName('last')
-			.setDescription('Show your most recent roll (ignores other options)')
+			.setDescription('Show your most recent roll')
 			.setRequired(false)),
 	async execute(interaction) {
 		const showLast = interaction.options.getBoolean('last') || false;
+		const pool = interaction.options.getInteger('pool');
+		const community = interaction.options.getInteger('community');
 		const expr = interaction.options.getString('expr');
 		const mode = interaction.options.getString('mode') || 'normal';
 		const hasExpr = interaction.options.getString('expr') !== null;
 
+		const { guildId, channelId } = interaction;
+		const userId = interaction.user.id;
+
 		try {
 			if (showLast) {
-				const last = await getLastRoll({ guildId: interaction.guildId, userId: interaction.user.id });
+				const last = await getLastRoll({ guildId, userId });
 				if (!last) {
 					await interaction.reply({ content: 'No previous rolls found for you in this server yet.', ephemeral: true });
 					return;
 				}
-
-				const embed = last.result?.type === '2d6'
-					? twoD6Embed(last.result, last.result.modifier || 0)
-					: exprResultEmbed(last.result);
-
-				await interaction.reply(await buildReply(embed, last.result, last.id));
+				const r = last.result;
+				const embed = r?.type === 'pool' ? poolEmbed(r)
+					: r?.type === 'community' ? communityEmbed(r)
+						: exprResultEmbed(r);
+				const components = r?.type === 'pool' ? rerollButtons(r) : [];
+				await interaction.reply(await buildReply(embed, r, last.id, components));
 				return;
 			}
 
-			if (!hasExpr) {
-				const { embed, components } = await buildModifierPicker(interaction.user.id, interaction.guildId);
-				await interaction.reply({ embeds: [embed], components, ephemeral: true });
-				return;
-			}
-
-			const cleaned = String(expr).trim().toLowerCase().replace(/\s+/g, '');
-			const match2d6 = cleaned.match(/^2d6(?<mod>[+-]\d+)?$/);
-			if (match2d6) {
-				const modifier = match2d6.groups?.mod ? Number.parseInt(match2d6.groups.mod, 10) : 0;
-				const result = roll2d6(mode);
-
+			// Community roll.
+			if (community !== null) {
+				const result = rollCommunity({ count: community, mode });
 				const rollId = await logRoll({
-					guildId: interaction.guildId,
-					channelId: interaction.channelId,
-					userId: interaction.user.id,
+					guildId, channelId, userId,
 					commandName: 'roll',
-					expr: cleaned,
+					expr: `community:${community}${mode !== 'normal' ? ` ${mode}` : ''}`,
 					mode,
-					result: { ...result, modifier },
+					result,
 				});
-
-				const embed = twoD6Embed(result, modifier);
-				await interaction.reply(await buildReply(embed, { ...result, modifier }, rollId));
+				await interaction.reply(await buildReply(communityEmbed(result), result, rollId));
 				return;
 			}
 
-			const modeOverride = mode === 'normal' ? null : mode;
-			const result = rollExpr(expr, modeOverride);
+			// Plain expression.
+			if (hasExpr) {
+				const modeOverride = mode === 'normal' ? null : mode;
+				const result = rollExpr(expr, modeOverride);
+				const rollId = await logRoll({
+					guildId, channelId, userId,
+					commandName: 'roll',
+					expr,
+					mode: result.mode,
+					result,
+				});
+				await interaction.reply(await buildReply(exprResultEmbed(result), result, rollId));
+				return;
+			}
 
-			const rollId = await logRoll({
-				guildId: interaction.guildId,
-				channelId: interaction.channelId,
-				userId: interaction.user.id,
-				commandName: 'roll',
-				expr,
-				mode: result.mode,
-				result,
-			});
+			// Push-your-luck pool.
+			if (pool !== null) {
+				const result = rollPool({ count: pool, mode });
+				const rollId = await logRoll({
+					guildId, channelId, userId,
+					commandName: 'roll',
+					expr: `pool:${pool}${mode !== 'normal' ? ` ${mode}` : ''}`,
+					mode,
+					result,
+				});
+				await interaction.reply(await buildReply(poolEmbed(result), result, rollId, rerollButtons(result)));
+				return;
+			}
 
-			const embed = exprResultEmbed(result);
-			await interaction.reply(await buildReply(embed, result, rollId));
+			// No options → quick menu.
+			const { embed, components } = buildQuickMenu();
+			await interaction.reply({ embeds: [embed], components, ephemeral: true });
 		}
 		catch (err) {
 			await interaction.reply({ content: `Could not roll: ${err.message}`, ephemeral: true });
 		}
 	},
-	// Exports for the button handler in index.js
-	STAT_LABELS,
-	resolveStatInfo,
-	buildModifierPicker,
-	buildModePicker,
-	executeQuickRoll,
+
+	// ── Exports for the button handler in index.js ──
+
+	/** Reroll the dice showing 1 (the bust reroll). */
+	rerollOnes(rolls) {
+		return rolls.map(v => (v === 1 ? rollPool({ count: 1 }).kept[0] : v));
+	},
+
+	/** Roll a fresh pool of the given size/mode (used by "reroll all"). */
+	rerollAll(count, mode) {
+		return rollPool({ count, mode });
+	},
+
+	buildQuickMenu,
+	buildReply,
+	rerollButtons,
+	decodeRolls,
+	encodeRolls,
+	executePoolRoll,
 };

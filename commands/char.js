@@ -58,13 +58,7 @@ module.exports = {
 			.addIntegerOption(opt => opt.setName('hp_max').setDescription('HP max').setRequired(false))
 			.addIntegerOption(opt => opt.setName('xp').setDescription('XP').setRequired(false))
 			.addIntegerOption(opt => opt.setName('load_current').setDescription('Current load (manual)').setRequired(false))
-			.addIntegerOption(opt => opt.setName('load_max').setDescription('Max load (manual)').setRequired(false))
-			.addIntegerOption(opt => opt.setName('str').setDescription('STR').setRequired(false))
-			.addIntegerOption(opt => opt.setName('dex').setDescription('DEX').setRequired(false))
-			.addIntegerOption(opt => opt.setName('con').setDescription('CON').setRequired(false))
-			.addIntegerOption(opt => opt.setName('int').setDescription('INT').setRequired(false))
-			.addIntegerOption(opt => opt.setName('wis').setDescription('WIS').setRequired(false))
-			.addIntegerOption(opt => opt.setName('cha').setDescription('CHA').setRequired(false)))
+			.addIntegerOption(opt => opt.setName('load_max').setDescription('Max load (manual)').setRequired(false)))
 		.addSubcommand(sub => sub
 			.setName('mod')
 			.setDescription('Modify character values by deltas (owner only)')
@@ -352,12 +346,6 @@ module.exports = {
 				}
 				if (record.kind === 'ambiguous') {
 					const patch = {};
-					const stats = {};
-					for (const key of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
-						const val = interaction.options.getInteger(key);
-						if (val !== null) stats[key] = val;
-					}
-					if (Object.keys(stats).length) patch.stats = stats;
 					const hp = interaction.options.getInteger('hp');
 					const hpMax = interaction.options.getInteger('hp_max');
 					const xp = interaction.options.getInteger('xp');
@@ -391,12 +379,6 @@ module.exports = {
 				}
 
 				const patch = {};
-				const stats = { ...(record.stats || {}) };
-				for (const key of ['str', 'dex', 'con', 'int', 'wis', 'cha']) {
-					const val = interaction.options.getInteger(key);
-					if (val !== null) stats[key] = val;
-				}
-				patch.stats = stats;
 
 				const hp = interaction.options.getInteger('hp');
 				const hpMax = interaction.options.getInteger('hp_max');
@@ -660,103 +642,74 @@ function buildWizardStep(interaction, step) {
 		return { embeds: [embed], components: [row, navRow] };
 	}
 
-	case 'stats_picker': {
-		const allAssigned = step.allAssigned;
-		const selectedKey = step.selectedPoolKey;
-		const poolKeys = step.poolKeys || [];
+	case 'traits_picker': {
+		const speciesOrder = step.speciesOrder || [];
+		const current = step.species;
+		const chosen = step.chosen || [];
+		const remaining = step.remaining;
+		const pickCount = step.pickCount || 2;
 
-		const desc = 'Assign your stats using the scores below.\n**Click a score** to select it, then **click a stat** to place it. Click an assigned stat to return it to the pool.\n\n' +
-	'`STR` — Strength — Clash, Defy Danger (might)\n' +
-	'`DEX` — Dexterity — Let Fly, Defy Danger (agility)\n' +
-	'`CON` — Constitution — Defend, Defy Danger (hold steady)\n' +
-	'`INT` — Intelligence — Know Things, Defy Danger (expertise)\n' +
-	'`WIS` — Wisdom — Seek Insight, Defy Danger (senses/will)\n' +
-	'`CHA` — Charisma — Persuade, Defy Danger (socially)\n\n' +
-	'_Stats range from \u22121 to +3. When a move calls for a roll, look here._';
+		const chosenBlock = chosen.length
+			? chosen.map(n => {
+				const t = step.traits.find(x => x.name === n);
+				return `• **${n}** — ${t ? t.text : ''}`;
+			}).join('\n')
+			: '_None yet._';
 
-		// Build a scoreboard string showing current assignments
-		const statNames = { str: 'STR', dex: 'DEX', con: 'CON', int: 'INT', wis: 'WIS', cha: 'CHA' };
-		const scoreboard = Object.entries(step.stats).map(([k, v]) => {
-			const label = statNames[k] || k.toUpperCase();
-			const val = v !== null ? v : '—';
-			return `**${label}** ${val}`;
-		}).join('  |  ');
+		const desc = `Pick **${pickCount} traits** from the shared list. Traits aren't locked to a species — pick anything, but be ready to **explain how it applies to you**.
+
+` +
+			`Browse species below, then toggle traits on. You can rename or rewrite them later on your sheet.\n\n` +
+			`**${current}** *(${step.flavor || ''})*\n` +
+			step.traits.map(t => `• **${t.name}** — ${t.text}`).join('\n') +
+			`\n\n**Picked (${chosen.length}/${pickCount})**\n${chosenBlock}`;
 
 		const embed = new EmbedBuilder()
-			.setTitle('Assign Your Stats')
-			.setDescription(`${desc}\n\n${scoreboard}`);
+			.setTitle('Pick Your Traits')
+			.setDescription(desc.slice(0, 4096));
 
 		const rows = [];
 
-		// Rows: Pool values (max 5 per row)
-		if (poolKeys.length > 0) {
-			let poolRow = new ActionRowBuilder();
-			let count = 0;
-			poolKeys.forEach((key, pi) => {
-				const v = step.pool[pi];
-				const isSelected = selectedKey === key;
-				poolRow.addComponents(
-					new ButtonBuilder()
-						.setCustomId(`rhune:create:selectpool:${key}`)
-						.setLabel(isSelected ? `▸ ${v > 0 ? '+' : ''}${v}` : `${v > 0 ? '+' : ''}${v}`)
-						.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary),
-				);
-				count++;
-				if (count === 5) {
-					rows.push(poolRow);
-					poolRow = new ActionRowBuilder();
-					count = 0;
-				}
-			});
-			if (poolRow.components.length > 0) rows.push(poolRow);
-		}
+		// Species select menu
+		const speciesMenu = new StringSelectMenuBuilder()
+			.setCustomId('rhune:create:selectspecies')
+			.setPlaceholder('Browse a species…')
+			.addOptions(speciesOrder.map(sp => ({
+				label: sp,
+				value: sp,
+				default: sp === current,
+			})));
+		rows.push(new ActionRowBuilder().addComponents(speciesMenu));
 
-		// Stat buttons (3 per row in display order)
-		const statOrder = ['str', 'dex', 'con', 'int', 'wis', 'cha'];
-		const row1 = new ActionRowBuilder();
-		statOrder.slice(0, 3).forEach(k => {
-			const v = step.stats[k];
-			const isAssigned = v !== null;
-			row1.addComponents(
+		// Trait toggle buttons
+		const traitRow = new ActionRowBuilder();
+		step.traits.forEach(t => {
+			const isChosen = chosen.includes(t.name);
+			traitRow.addComponents(
 				new ButtonBuilder()
-					.setCustomId(`rhune:create:assignstat:${k}`)
-					.setLabel(`${statNames[k]} ${isAssigned ? (v > 0 ? '+' : '') + v : '—'}`)
-					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
+					.setCustomId(`rhune:create:toggletrait:${t.name}`)
+					.setLabel(`${isChosen ? '✓ ' : ''}${t.name}`)
+					.setStyle(isChosen ? ButtonStyle.Success : ButtonStyle.Secondary),
 			);
 		});
-		rows.push(row1);
-
-		const row2 = new ActionRowBuilder();
-		statOrder.slice(3).forEach(k => {
-			const v = step.stats[k];
-			const isAssigned = v !== null;
-			row2.addComponents(
-				new ButtonBuilder()
-					.setCustomId(`rhune:create:assignstat:${k}`)
-					.setLabel(`${statNames[k]} ${isAssigned ? (v > 0 ? '+' : '') + v : '—'}`)
-					.setStyle(isAssigned ? ButtonStyle.Success : ButtonStyle.Secondary),
-			);
-		});
-		rows.push(row2);
+		rows.push(traitRow);
 
 		// Navigation row
-		const navRow = new ActionRowBuilder()
-			.addComponents(
-				new ButtonBuilder()
-					.setCustomId('rhune:create:back')
-					.setLabel('‹ Back')
-					.setStyle(ButtonStyle.Secondary),
-				new ButtonBuilder()
-					.setCustomId('rhune:create:confirm')
-					.setLabel('Stats Assigned — Continue')
-					.setStyle(ButtonStyle.Success)
-					.setDisabled(!allAssigned),
-				new ButtonBuilder()
-					.setCustomId('rhune:create:cancel')
-					.setLabel('Cancel')
-					.setStyle(ButtonStyle.Danger),
-			);
-		rows.push(navRow);
+		rows.push(new ActionRowBuilder().addComponents(
+			new ButtonBuilder()
+				.setCustomId('rhune:create:back')
+				.setLabel('‹ Back')
+				.setStyle(ButtonStyle.Secondary),
+			new ButtonBuilder()
+				.setCustomId('rhune:create:confirm')
+				.setLabel(remaining > 0 ? `Pick ${remaining} more` : 'Traits Chosen — Continue')
+				.setStyle(ButtonStyle.Success)
+				.setDisabled(remaining > 0),
+			new ButtonBuilder()
+				.setCustomId('rhune:create:cancel')
+				.setLabel('Cancel')
+				.setStyle(ButtonStyle.Danger),
+		));
 
 		return { embeds: [embed], components: rows };
 	}
@@ -971,14 +924,18 @@ function buildWizardStep(interaction, step) {
 			allMovesList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
 		});
 
+		const traitsLine = (step.traits || []).length
+			? step.traits.map(t => `• **${t.name}** — ${t.text}`).join('\n')
+			: '—';
+
 		const embed = new EmbedBuilder()
 			.setTitle('Confirm Character')
 			.setDescription(
 				`**Name:** ${step.name}\n` +
 				`**Playbook:** ${step.playbook}\n` +
 				`**Background:** ${step.background}\n` +
-				`**Instinct:** ${step.instinct}\n` +
-				`**Stats:** ${step.statLine}\n\n` +
+				`**Instinct:** ${step.instinct}\n\n` +
+				`**Traits:**\n${traitsLine}\n\n` +
 				`**Starting Moves:**\n${allMovesList}` +
 				`\n**Special Possessions:**\n${(step.possessions || []).length ? step.possessions.map(p => `• ${p}`).join('\n') : '—'}`,
 			);

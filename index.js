@@ -73,7 +73,8 @@ const { getPending, clearPending } = require('./lib/pending_actions');
 const { upsertInventoryState, getInventoryState } = require('./lib/inventory_state_pb');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, selectPoolValue, assignStat, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
+const { TRAIT_BY_NAME } = require('./lib/traits_data');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, browseSpecies, toggleTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents, handleError } = require('./lib/interaction_helpers');
 const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
@@ -300,90 +301,65 @@ client.on(Events.InteractionCreate, async interaction => {
 			try {
 				const parts = interaction.customId.split(':');
 				const action = parts[2];
-				// pick, confirm, back, cancel
 
-				// Cancel — dismiss the menu
+				// Cancel — dismiss the menu.
 				if (action === 'cancel') {
 					await interaction.update({ content: 'Cancelled.', embeds: [], components: [], flags: 64 });
 					return;
 				}
 
-				// Back — return to modifier picker
-				if (action === 'back') {
-					const { embed, components } = await rollCommand.buildModifierPicker(
-						interaction.user.id, interaction.guildId,
-					);
+				// Switch mode — re-render the pool picker (stateless).
+				if (action === 'menu') {
+					const mode = parts[3] || 'normal';
+					const { embed, components } = rollCommand.buildQuickMenu(mode);
 					await interaction.update({ embeds: [embed], components, flags: 64 });
 					return;
 				}
 
-				// Pick — user chose a modifier, show mode picker
-				if (action === 'pick') {
-					const kind = parts[3];
-					// 'flat' or 'stat'
-					const flat = kind === 'flat';
-					const statKey = flat ? null : parts[4];
-
-					const { modifier, statName, charName } = await rollCommand.resolveStatInfo(
-						interaction.user.id, interaction.guildId, statKey,
-					);
-
-					const { embed, components } = rollCommand.buildModePicker({
-						flat,
-						statKey,
-						modifier,
-						statName,
-						charName,
-					});
-					await interaction.update({ embeds: [embed], components, flags: 64 });
-					return;
-				}
-
-				// Confirm — execute the roll and send result to channel
-				if (action === 'confirm') {
-					const kind = parts[3];
-					// 'flat' or 'stat'
-					const statKey = kind === 'stat' ? parts[4] : null;
-					const mode = kind === 'stat' ? parts[5] : parts[4];
-
-					const { modifier, statName, charName } = await rollCommand.resolveStatInfo(
-						interaction.user.id, interaction.guildId, statKey,
-					);
-
-					const result = await rollCommand.executeQuickRoll(interaction, {
-						modifier, mode, statKey, statName, charName,
-					});
-
-					// Post the result publicly in the channel for everyone (like /roll exp).
-					if (interaction.guildId) {
-						const channel = interaction.channel
-							?? await interaction.client.channels.fetch(interaction.channelId);
-
-						if (!channel?.isTextBased?.()) {
-							throw new Error('Channel is not text-based.');
-						}
-
-						try {
-							await channel.send({ embeds: result.embeds, files: result.files });
-							// Public post succeeded: collapse the ephemeral picker menu.
-							await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
-						}
-						catch (err) {
-							// Fallback: if the public post fails, show the result to the roller
-							// so they're never left with just "✅ Rolled!" (no Bug #1 regression).
-							console.error('Quick roll public post failed:', err?.message || err);
-							await interaction.update({ content: '✅ Rolled!', embeds: result.embeds, files: result.files, components: [], flags: 64 });
-						}
-					}
-					else {
-						// DMs have no guild/channel to post to publicly — keep it ephemeral.
-						await interaction.update({ content: '✅ Rolled!', embeds: result.embeds, files: result.files, components: [], flags: 64 });
-					}
+				// Roll a pool: rhune:qr:pool:<n>:<mode>
+				if (action === 'pool') {
+					const count = Number.parseInt(parts[3], 10);
+					const mode = parts[4] || 'normal';
+					await rollCommand.executePoolRoll(interaction, { count, mode });
 					return;
 				}
 			}
 			catch (err) {
 				console.error('Quick roll error:', err);
+				try {
+					await interaction.update({ content: `Error: ${err.message}`, embeds: [], components: [], flags: 64 });
+				}
+				catch {
+					// swallow
+				}
+			}
+			return;
+		}
+
+		// === Reroll buttons: rhune:rr:* ===
+		if (interaction.customId.startsWith('rhune:rr:')) {
+			try {
+				const parts = interaction.customId.split(':');
+				const kind = parts[2];
+
+				if (kind === 'ones') {
+					// Reroll every die showing a 1 (the bust reroll).
+					const kept = rollCommand.decodeRolls(parts[3]);
+					const newKept = rollCommand.rerollOnes(kept);
+					await rollCommand.executePoolRoll(interaction, { keptRolls: newKept });
+					return;
+				}
+
+				if (kind === 'all') {
+					// Fresh roll of the same pool size/mode.
+					const count = Number.parseInt(parts[3], 10);
+					const mode = parts[4] || 'normal';
+					await rollCommand.executePoolRoll(interaction, { count, mode });
+					return;
+				}
+			}
+			catch (err) {
+				console.error('Reroll error:', err);
 				try {
 					await interaction.update({ content: `Error: ${err.message}`, embeds: [], components: [], flags: 64 });
 				}
@@ -809,16 +785,11 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'togglemove':
 					toggleMove(wizardId, value);
 					break;
-				case 'selectpool': {
-					// format: rhune:create:selectpool:<index>:<value>
-					const poolParts = interaction.customId.split(':').slice(3);
-					const poolIndex = parseInt(poolParts[0], 10);
-					const poolVal = parseInt(poolParts.slice(1).join(':'), 10);
-					selectPoolValue(wizardId, poolIndex, poolVal);
+				case 'browsespecies':
+					browseSpecies(wizardId, value);
 					break;
-				}
-				case 'assignstat':
-					assignStat(wizardId, value);
+				case 'toggletrait':
+					toggleTrait(wizardId, value);
 					break;
 				case 'togglepossession':
 					togglePossession(wizardId, value);
@@ -863,6 +834,10 @@ client.on(Events.InteractionCreate, async interaction => {
 						playbook: state.playbookKey,
 						background: state.background,
 						instinct: state.instinct,
+						traits: (state.chosenTraits || []).map(name => {
+							const t = TRAIT_BY_NAME[name];
+							return { name, text: t ? t.text : '', improved: false, superior: false };
+						}),
 						chosen_moves: allMoves,
 						chosen_possessions: state.chosenPossessions || [],
 					};
@@ -874,7 +849,6 @@ client.on(Events.InteractionCreate, async interaction => {
 						ownerUserId: state.userId,
 						name: state.name,
 						playbook: state.playbookKey,
-						stats: { ...state.stats },
 						hp: maxHp,
 						hpMax: maxHp,
 						xp: 0,

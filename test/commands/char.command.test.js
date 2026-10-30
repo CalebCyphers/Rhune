@@ -89,7 +89,7 @@ async function loadCharCommandWithStubs(stubs) {
 	const noop = () => undefined;
 	restores.push(stubRequire('../../lib/create_wizard', {
 		startWizard: noop,
-		getStepInfo: () => ({ type: 'playbook_picker', backgrounds: [], instincts: [], pool: [], poolKeys: [], stats: { str: null, dex: null, con: null, int: null, wis: null, cha: null }, allAssigned: false }),
+		getStepInfo: () => ({ type: 'playbook_picker', playbooks: [] }),
 		selectPlaybook: noop,
 	}));
 	restores.push(stubRequire('../../lib/conditions_pb', { addCondition: async () => ({}), removeCondition: async () => ({ deleted: 0 }) }));
