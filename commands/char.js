@@ -12,6 +12,8 @@ const {
 
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
 const { lookupPlaybook } = require('../lib/playbooks');
+const { buildSheetButtons } = require('../lib/sheet_buttons');
+const siteLinks = require('../lib/site_links');
 const { startWizard, getStepInfo, selectPlaybook } = require('../lib/create_wizard');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
@@ -296,43 +298,8 @@ module.exports = {
 
 				const embed = await renderCharacterSheetEmbed(record);
 
-				// Sheet action buttons
-				const components = [];
-				const row = new ActionRowBuilder();
-
-				if (record.playbook && lookupPlaybook(record.playbook)) {
-					row.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:playbook:${record.id}`)
-							.setLabel('Playbook')
-							.setStyle(ButtonStyle.Primary),
-						new ButtonBuilder()
-							.setCustomId(`rhune:move:sheet:${record.id}`)
-							.setLabel('Moves')
-							.setStyle(ButtonStyle.Secondary),
-					);
-				}
-				else {
-					row.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:move:sheet:${record.id}`)
-							.setLabel('Moves')
-							.setStyle(ButtonStyle.Secondary),
-					);
-				}
-
-				row.addComponents(
-					new ButtonBuilder()
-						.setCustomId(`rhune:inventory:${record.id}`)
-						.setLabel('Inventory')
-						.setStyle(ButtonStyle.Secondary),
-					new ButtonBuilder()
-						.setCustomId(`rhune:edit:${record.id}`)
-						.setLabel('Edit')
-						.setStyle(ButtonStyle.Secondary),
-				);
-
-				components.push(row);
+				// Sheet action buttons (shared builder; includes the Rules ↗ link).
+				const components = [buildSheetButtons(record)];
 
 				await interaction.reply({ embeds: [embed], components, ephemeral: true });
 				return;
@@ -545,10 +512,15 @@ function buildWizardStep(interaction, step) {
 			const pb = lookupPlaybook(key);
 			const die = pb.creationRules?.die || 'd6';
 			const hp = pb.creationRules?.maxHP || '?';
+			const url = siteLinks.playbookUrl(key);
+			const link = url ? `[Read the ${pb.name} →](${url})` : '';
 			embed.addFields({
 				name: pb.name,
 				value: `*${pb.tagline}*
-\`Damage ${die}  ·  Max HP ${hp}\``,
+` +
+					`\`Damage ${die}  ·  Max HP ${hp}\`` +
+					(link ? `
+${link}` : ''),
 			});
 		});
 
@@ -574,9 +546,12 @@ function buildWizardStep(interaction, step) {
 
 		step.backgrounds.forEach(bg => {
 			const grantLine = bg.grants.length > 0 ? `\n*(Grants: ${bg.grants.join(', ')})*` : '';
+			const url = siteLinks.backgroundUrl(step.playbookKey, bg.name);
+			const link = url ? `
+[Read the full background →](${url})` : '';
 			embed.addFields({
 				name: bg.name.substring(0, 256),
-				value: (bg.text + grantLine).substring(0, 1024),
+				value: (bg.text + grantLine + link).substring(0, 1024),
 			});
 		});
 
@@ -616,6 +591,12 @@ function buildWizardStep(interaction, step) {
 				value: inst.desc.substring(0, 1024),
 			});
 		});
+
+		// Deep link to the playbook's Instinct section on the rules site.
+		{
+			const url = siteLinks.instinctUrl(step.playbookKey);
+			if (url) embed.setDescription(`${embed.data.description}\n\n[Read the full Instincts list →](${url})`);
+		}
 
 		const row = new ActionRowBuilder();
 		step.instincts.forEach(inst => {
@@ -659,7 +640,8 @@ function buildWizardStep(interaction, step) {
 		const desc = `Pick **${pickCount} traits** from the shared list. Traits aren't locked to a species — pick anything, but be ready to **explain how it applies to you**.
 
 ` +
-			`Browse species below, then toggle traits on. You can rename or rewrite them later on your sheet.\n\n` +
+			`Browse species below, then toggle traits on. You can rename or rewrite them later on your sheet.\n` +
+			`[See the full trait list on the rules site →](${siteLinks.TRAIT_LIST_URL})\n\n` +
 			`**${current}** *(${step.flavor || ''})*\n` +
 			step.traits.map(t => `• **${t.name}** — ${t.text}`).join('\n') +
 			`\n\n**Picked (${chosen.length}/${pickCount})**\n${chosenBlock}`;
@@ -774,7 +756,12 @@ function buildWizardStep(interaction, step) {
 			remainingText += `\n\n_(${overflow} more moves available — browse with \`/move\` after creation.)_`;
 		}
 
-		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}`;
+		// Deep link to the playbook's Moves section on the rules site.
+		const movesSectionUrl = siteLinks.playbookMovesUrl(step.playbookKey);
+		const movesLink = movesSectionUrl ? `
+[Browse the full move list →](${movesSectionUrl})` : '';
+
+		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}${movesLink}`;
 
 		const embed = new EmbedBuilder()
 			.setTitle('Choose Your Starting Moves')
@@ -928,14 +915,21 @@ function buildWizardStep(interaction, step) {
 			? step.traits.map(t => `• **${t.name}** — ${t.text}`).join('\n')
 			: '—';
 
+		// Rules-site links for the summary lines.
+		const pbUrl = siteLinks.playbookUrl(step.playbookKey);
+		const bgUrl = siteLinks.backgroundUrl(step.playbookKey, step.background);
+		const instUrl = siteLinks.instinctUrl(step.playbookKey);
+		const link = (label, url) => (url ? `[${label}](${url})` : label);
+
 		const embed = new EmbedBuilder()
 			.setTitle('Confirm Character')
 			.setDescription(
 				`**Name:** ${step.name}\n` +
-				`**Playbook:** ${step.playbook}\n` +
-				`**Background:** ${step.background}\n` +
-				`**Instinct:** ${step.instinct}\n\n` +
-				`**Traits:**\n${traitsLine}\n\n` +
+				`**Playbook:** ${link(step.playbook, pbUrl)}\n` +
+				`**Background:** ${link(step.background, bgUrl)}\n` +
+				`**Instinct:** ${link(step.instinct, instUrl)}\n\n` +
+				`**Traits:**\n${traitsLine}\n` +
+				`[Full trait list →](${siteLinks.TRAIT_LIST_URL})\n\n` +
 				`**Starting Moves:**\n${allMovesList}` +
 				`\n**Special Possessions:**\n${(step.possessions || []).length ? step.possessions.map(p => `• ${p}`).join('\n') : '—'}`,
 			);

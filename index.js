@@ -73,6 +73,7 @@ const { getPending, clearPending } = require('./lib/pending_actions');
 const { upsertInventoryState, getInventoryState } = require('./lib/inventory_state_pb');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
+const { buildSheetButtons } = require('./lib/sheet_buttons');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, browseSpecies, toggleTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
@@ -379,33 +380,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					const record = await getCharacterById({ id: charId });
 					const embed = await renderCharacterSheetEmbed(record);
 
-					const row = new ActionRowBuilder();
-					if (record.playbook && lookupPlaybook(record.playbook)) {
-						row.addComponents(
-							new ButtonBuilder()
-								.setCustomId(`rhune:playbook:${record.id}`)
-								.setLabel('Playbook')
-								.setStyle(ButtonStyle.Primary),
-							new ButtonBuilder()
-								.setCustomId(`rhune:move:sheet:${record.id}`)
-								.setLabel('Moves')
-								.setStyle(ButtonStyle.Secondary),
-						);
-					}
-					else {
-						row.addComponents(
-							new ButtonBuilder()
-								.setCustomId(`rhune:move:sheet:${record.id}`)
-								.setLabel('Moves')
-								.setStyle(ButtonStyle.Secondary),
-						);
-					}
-					row.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:edit:${record.id}`)
-							.setLabel('Edit')
-							.setStyle(ButtonStyle.Secondary),
-					);
+					const row = buildSheetButtons(record);
 
 					await interaction.update({ embeds: [embed], components: [row], flags: 64 });
 					return;
@@ -734,21 +709,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				const embed = await renderCharacterSheetEmbed(record);
 
 
-				const row = new ActionRowBuilder();
-				if (record.playbook && lookupPlaybook(record.playbook)) {
-					row.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:playbook:${record.id}`)
-							.setLabel('Playbook')
-							.setStyle(ButtonStyle.Primary),
-					);
-				}
-				row.addComponents(
-					new ButtonBuilder()
-						.setCustomId(`rhune:edit:${record.id}`)
-						.setLabel('Edit')
-						.setStyle(ButtonStyle.Secondary),
-				);
+				const row = buildSheetButtons(record);
 
 				await interaction.update({ embeds: [embed], components: [row], flags: 64 });
 			}
@@ -861,32 +822,8 @@ client.on(Events.InteractionCreate, async interaction => {
 
 					const embed = await renderCharacterSheetEmbed(record);
 
-					// Sheet action buttons
-
-					const components = [];
-					const row = new ActionRowBuilder();
-
-					if (record.playbook && lookupPlaybook(record.playbook)) {
-						row.addComponents(
-							new ButtonBuilder()
-								.setCustomId(`rhune:playbook:${record.id}`)
-								.setLabel('Playbook')
-								.setStyle(ButtonStyle.Primary),
-							new ButtonBuilder()
-								.setCustomId(`rhune:move:sheet:${record.id}`)
-								.setLabel('Moves')
-								.setStyle(ButtonStyle.Secondary),
-						);
-					}
-
-					row.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:edit:${record.id}`)
-							.setLabel('Edit')
-							.setStyle(ButtonStyle.Secondary),
-					);
-
-					components.push(row);
+					// Sheet action buttons (shared builder; includes the Rules ↗ link).
+					const components = [buildSheetButtons(record)];
 
 					await interaction.editReply({ embeds: [embed], components, flags: 64 });
 					clearWizard(wizardId);
