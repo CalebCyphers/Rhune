@@ -5,6 +5,10 @@
 // We read the canonical vault files (stat-less rules), match them to the
 // bot's move names, and emit a name → trigger map.
 //
+// Moves that have no "when" (passive/permanent) still render their text when
+// it's short (1–2 sentences) — e.g. "Increase your max HP by 4." Longer
+// passives are left out (name + site link only).
+//
 // Run: node scripts/gen-move-triggers.js [--check]
 //   --check  exit non-zero if the generated file would change (CI-friendly)
 
@@ -16,17 +20,17 @@ const VAULT = path.resolve(ROOT, '../rhune-ttrpg/RULES');
 const CORE_DIR = path.join(VAULT, 'moves');
 const PB_DIR = path.join(VAULT, '02-playbooks');
 
+const normalize = s => String(s == null ? '' : s).toLowerCase()
+	.replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
+
 // Hand-written triggers for moves the vault can't supply a clean "when" for:
-// pointer stubs, list-style special moves, and moves with no page yet.
+// pointer stubs, list-style special moves, and multi-season moves.
 // Keyed by normalized move name.
 const OVERRIDES = {
 	"death's door": "When you're dying (0 HP from a killing blow)",
 	'advantage disadvantage': 'When you roll with advantage or disadvantage',
-	'a bundle of sticks unbroken': 'As long as you are traveling with a follower',
+	"seasons change": 'When spring bursts forth upon the land… when the hot days of summer settle across the land… when autumn falls and the land is ripe for harvest… when winter grips the land…',
 };
-
-const normalize = s => String(s == null ? '' : s).toLowerCase()
-	.replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
 
 // Overrides keyed by normalized name (so apostrophes/punctuation don't matter).
 const OVERRIDE_BY_NORM = {};
@@ -46,6 +50,8 @@ function firstSentence(text) {
 	}
 	return text.trim();
 }
+
+const countSentences = t => (String(t).match(/[^.!?]+[.!?]+/g) || [t]).length;
 
 const stripInline = t => t
 	.replace(/\s+/g, ' ')
@@ -70,39 +76,36 @@ const trimTrigger = t => t
 
 /**
  * Extract the opening trigger/body paragraph from a vault move file.
- * Returns { text, kind } where kind is 'when' | 'passive' | 'pointer' | 'none'.
+ * Returns { text, full, kind } where:
+ *   text = first sentence (the "when" clause)
+ *   full = whole opening line (used for short passive moves)
+ *   kind = 'when' | 'passive' | 'pointer' | 'none'
  */
 function extractTrigger(raw) {
 	const lines = raw.split('\n');
 	const attrIdx = lines.findIndex(l => /^\*A (playbook|starting) move from/.test(l.trim()));
 	const body = (attrIdx >= 0 ? lines.slice(attrIdx + 1) : lines).join('\n');
 
-	// Paragraphs separated by blank lines.
 	const paras = body.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
 	for (const p of paras) {
 		if (/^#/.test(p)) continue;                         // markdown heading
-		if (/^\*\s*\(Requires/.test(p)) continue;          // "(Requires …)" line
-		if (/^---/.test(p)) continue;                        // hr
+		if (/^\*\s*\(Requires/.test(p)) continue;           // "(Requires …)" line
+		if (/^---/.test(p)) continue;                       // hr
 		// Only the first physical line of the paragraph is the trigger/body.
-		// (List items or extra prose follow on subsequent lines.)
 		const firstLine = p.split('\n')[0].trim();
 		if (!firstLine) continue;
+
 		const isItalic = /^\*(?!\*)/.test(firstLine);
-		if (isItalic) {
-			const t = stripInline(firstLine.replace(/^\*+/, '').replace(/\*+$/, ''));
-			if (!t) continue;
-			if (/^→|^see `/i.test(t)) return { text: t, kind: 'pointer' };
-			const s = firstSentence(t);
-			return { text: trimTrigger(s), kind: /^(when|whenever|while|after|before|each time|if|once per|any time)\b/i.test(t) ? 'when' : 'passive' };
-		}
-		// Plain paragraph (passive/permanent move).
-		const t = stripInline(firstLine);
-		if (!t) continue;
-		if (/^→|^see `/i.test(t)) return { text: t, kind: 'pointer' };
-		const s = firstSentence(t);
-		return { text: trimTrigger(s), kind: /^(when|whenever|while|after|before|each time|if|once per|any time)\b/i.test(t) ? 'when' : 'passive' };
+		const rawLine = isItalic
+			? stripInline(firstLine.replace(/^\*+/, '').replace(/\*+$/, ''))
+			: stripInline(firstLine);
+		if (!rawLine) continue;
+		if (/^→|^see `/i.test(rawLine)) return { text: rawLine, full: rawLine, kind: 'pointer' };
+
+		const isWhen = /^(when|whenever|while|after|before|each time|if|once per|any time)\b/i.test(rawLine);
+		return { text: trimTrigger(firstSentence(rawLine)), full: rawLine, kind: isWhen ? 'when' : 'passive' };
 	}
-	return { text: null, kind: 'none' };
+	return { text: null, full: null, kind: 'none' };
 }
 
 function readVaultDir(dir) {
@@ -136,11 +139,16 @@ function main() {
 		const ov = OVERRIDE_BY_NORM[normalize(name)];
 		if (ov) { if (v) used.add(v.file); triggers[normalize(name)] = ov; flags.push({ where, name, kind: 'override', text: ov }); return; }
 		used.add(v.file);
-		const { text, kind } = extractTrigger(v.raw);
+		const { text, full, kind } = extractTrigger(v.raw);
 		if (!text) { flags.push({ where, name, kind: 'no-text' }); return; }
+		if (kind === 'pointer') { triggers[normalize(name)] = text; flags.push({ where, name, kind: 'pointer', text }); return; }
+		if (kind === 'passive') {
+			// Short passive moves (1–2 sentences) read fine inline, like a trigger.
+			if (countSentences(full) <= 2) { triggers[normalize(name)] = full; flags.push({ where, name, kind: 'passive-short', text: full }); }
+			else { flags.push({ where, name, kind: 'passive-long', text: full }); }
+			return;
+		}
 		triggers[normalize(name)] = text;
-		if (kind === 'passive') flags.push({ where, name, kind: 'no-when', text });
-		else if (kind === 'pointer') flags.push({ where, name, kind: 'pointer', text });
 	};
 
 	for (const c of categoryNames) {
@@ -163,10 +171,11 @@ function main() {
 				else { flags.push({ where: k, name, kind: 'no-vault' }); }
 				continue;
 			}
-			add(name, v, k);		}
+			add(name, v, k);
+		}
 	}
 
-	// Report vault files not used by any bot move (dedupe: shared copies).
+	// Vault files not used by any bot move (dedupe: shared copies).
 	const unused = [...coreVault, ...pbVault].filter(v => !used.has(v.file) && !coreVault.includes(v));
 
 	// Emit the module.
@@ -177,7 +186,8 @@ function main() {
 // Regenerate: node scripts/gen-move-triggers.js
 //
 // Each entry is a move's opening "when…" trigger, keyed by normalized name
-// (lowercase, "&"→"and", non-alphanumerics→spaces).
+// (lowercase, "&"→"and", non-alphanumerics→spaces). Short passive moves
+// (1–2 sentences, no "when") are included with their full text.
 
 const TRIGGERS = {
 ${entries}

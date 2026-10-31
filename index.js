@@ -84,7 +84,7 @@ const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
 const { isGuildOwner } = require('./lib/gm');
-const { moves, categoryNames, getCategoryLabel, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
+const { moves, categoryNames, getCategoryLabel, getCategoryEmoji, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
 const { splitIntoChunks, tagPagination } = require('./lib/embed_pager');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
@@ -973,8 +973,9 @@ client.on(Events.InteractionCreate, async interaction => {
 				const lines = [];
 				if (trigger) lines.push(trigger);
 				lines.push(moveUrl ? `[Read the full move ↗](${moveUrl})` : '*Not on the site yet.*');
+				const emoji = getCategoryEmoji(category);
 				const embed = new EmbedBuilder()
-					.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
+					.setTitle(emoji ? `${moveName} ${emoji}` : moveName)
 					.setDescription(lines.join('\n\n'));
 
 				const pickerRow = buildMovePicker(category);

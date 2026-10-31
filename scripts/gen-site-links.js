@@ -141,6 +141,22 @@ for (const rel of groups.playbookMoves) {
 	if (!playbookMoveAny[norm(name)]) playbookMoveAny[norm(name)] = url(rel);
 }
 
+// Legacy bot move names → canonical vault name. Keeps old saved characters
+// (and any stale references) resolving after a vault rename.
+const LEGACY_MOVE_ALIASES = {
+	'Judge::chronicler of stonetop': 'Judge::chronicler',
+};
+for (const [alias, canonical] of Object.entries(LEGACY_MOVE_ALIASES)) {
+	if (playbookMoveUrl[canonical] && !playbookMoveUrl[alias]) {
+		playbookMoveUrl[alias] = playbookMoveUrl[canonical];
+	}
+	const anyKey = alias.split('::')[1];
+	const anyCanonical = canonical.split('::')[1];
+	if (playbookMoveAny[anyCanonical] && !playbookMoveAny[anyKey]) {
+		playbookMoveAny[anyKey] = playbookMoveAny[anyCanonical];
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Inserts, arcana, gear, setting, steading — normalized title -> url.
 
