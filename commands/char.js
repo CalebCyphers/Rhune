@@ -22,6 +22,7 @@ const { balanceEmphasis, cutMarkdown } = require('../lib/format');
 const { disambiguationMessage } = require('../lib/disambiguation');
 const { setPending } = require('../lib/pending_actions');
 const { isGuildOwner } = require('../lib/gm');
+const { replyEphemeral, deferCommand } = require('../lib/interaction_helpers');
 
 module.exports = {
 	data: new SlashCommandBuilder()
@@ -92,9 +93,12 @@ module.exports = {
 
 		try {
 			if (!interaction.guildId) {
-				await interaction.reply({ content: 'This command only works inside a server.', ephemeral: true });
+				await replyEphemeral(interaction, { content: 'This command only works inside a server.', ephemeral: true });
 				return;
 			}
+
+			// Ack within Discord's 3s window before any PocketBase work.
+			await deferCommand(interaction);
 
 			// Guild owner = GM. GMs may check & edit any character in the guild.
 			const isGm = await isGuildOwner(interaction, interaction.user.id);
@@ -113,7 +117,7 @@ module.exports = {
 
 				const step = getStepInfo(interaction.user.id);
 				const { embeds, components } = buildWizardStep(interaction, step);
-				await interaction.reply({ embeds, components, ephemeral: true });
+				await replyEphemeral(interaction, { embeds, components, ephemeral: true });
 				return;
 			}
 
@@ -122,7 +126,7 @@ module.exports = {
 
 				// Listing all characters in the server is a GM (guild owner) action.
 				if (all && !isGm) {
-					await interaction.reply({ content: 'Only the guild owner can list all characters in this server.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'Only the guild owner can list all characters in this server.', ephemeral: true });
 					return;
 				}
 
@@ -132,7 +136,7 @@ module.exports = {
 				});
 
 				if (!chars.length) {
-					await interaction.reply({ content: all ? 'No characters found in this server yet.' : 'You have no characters in this server yet.', ephemeral: true });
+					await replyEphemeral(interaction, { content: all ? 'No characters found in this server yet.' : 'You have no characters in this server yet.', ephemeral: true });
 					return;
 				}
 
@@ -145,12 +149,11 @@ module.exports = {
 					return `• **${c.name}**${playbookText} — \`${c.id}\`${ownerText}${activeMark}`;
 				});
 
-				await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+				await replyEphemeral(interaction, { content: lines.join('\n'), ephemeral: true });
 				return;
 			}
 
 			if (sub === 'rename') {
-				await interaction.deferReply({ flags: 64 });
 				const newName = interaction.options.getString('new_name');
 				const record = await resolveCharRecord();
 				if (!record) {
@@ -187,28 +190,28 @@ module.exports = {
 			if (sub === 'delete') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char delete`.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char delete`.', ephemeral: true });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
 					setPending(interaction.user.id, { action: 'delete' });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'delete' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: record.target, matches: record.matches, action: 'delete' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${record.target}**.`, ephemeral: true });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'That character is not from this server.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 
@@ -219,7 +222,7 @@ module.exports = {
 				}
 
 				await deleteCharacter({ id: record.id });
-				await interaction.reply({ content: `Deleted character **${record.name}**.`, ephemeral: true });
+				await replyEphemeral(interaction, { content: `Deleted character **${record.name}**.`, ephemeral: true });
 				return;
 			}
 
@@ -228,29 +231,29 @@ module.exports = {
 				const res = await resolveCharacterTarget({ guildId: interaction.guildId, userId: interaction.user.id, target });
 				if (res.kind === 'ambiguous') {
 					setPending(interaction.user.id, { action: 'active' });
-					await interaction.reply(disambiguationMessage({ target: res.target, matches: res.matches, action: 'active' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: res.target, matches: res.matches, action: 'active' }));
 					return;
 				}
 				if (res.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${res.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${res.target}**.`, ephemeral: true });
 					return;
 				}
 				if (res.kind !== 'ok') {
-					await interaction.reply({ content: 'Could not resolve character target.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'Could not resolve character target.', ephemeral: true });
 					return;
 				}
 				const record = res.record;
 				if (record.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That character id is not from this server.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'That character id is not from this server.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 
 				await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: record.id });
-				await interaction.reply({ content: 'Set active character to **' + record.name + '** (`' + record.id + '`).', ephemeral: true });
+				await replyEphemeral(interaction, { content: 'Set active character to **' + record.name + '** (`' + record.id + '`).', ephemeral: true });
 				return;
 			}
 
@@ -270,31 +273,31 @@ module.exports = {
 			if (sub === 'sheet') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char sheet`.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char sheet`.', ephemeral: true });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
 					setPending(interaction.user.id, { action: 'sheet' });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'sheet' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: record.target, matches: record.matches, action: 'sheet' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${record.target}**.`, ephemeral: true });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set.', ephemeral: true });
 					return;
 				}
 
 				if (record.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'That character is not from this server.', ephemeral: true });
 					return;
 				}
 
 				// Sheet: owner, or the guild owner (GM) may view any character in the guild.
 				if (record.owner_user_id !== interaction.user.id && !isGm) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 
@@ -303,14 +306,14 @@ module.exports = {
 				// Sheet action buttons (shared builder; includes the Rules ↗ link).
 				const components = [buildSheetButtons(record)];
 
-				await interaction.reply({ embeds: [embed], components, ephemeral: true });
+				await replyEphemeral(interaction, { embeds: [embed], components, ephemeral: true });
 				return;
 			}
 
 			if (sub === 'set') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char set`.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char set`.', ephemeral: true });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
@@ -327,23 +330,23 @@ module.exports = {
 					if (loadMax !== null) patch.load_max = loadMax;
 
 					setPending(interaction.user.id, { action: 'set', payload: { patch } });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'set' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: record.target, matches: record.matches, action: 'set' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${record.target}**.`, ephemeral: true });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'That character is not from this server.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id && !isGm) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 
@@ -363,14 +366,14 @@ module.exports = {
 
 				const updated = await updateCharacter({ id: record.id, patch });
 				const embed = await renderCharacterSheetEmbed(updated);
-				await interaction.reply({ content: 'Updated character.', embeds: [embed], ephemeral: true });
+				await replyEphemeral(interaction, { content: 'Updated character.', embeds: [embed], ephemeral: true });
 				return;
 			}
 
 			if (sub === 'mod') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char mod`.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char mod`.', ephemeral: true });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
@@ -380,23 +383,23 @@ module.exports = {
 					const loadCurrent = interaction.options.getInteger('load_current');
 					const loadMax = interaction.options.getInteger('load_max');
 					setPending(interaction.user.id, { action: 'mod', payload: { deltas: { hp, hp_max: hpMax, xp, load_current: loadCurrent, load_max: loadMax } } });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'mod' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: record.target, matches: record.matches, action: 'mod' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${record.target}**.`, ephemeral: true });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.guild_id !== interaction.guildId) {
-					await interaction.reply({ content: 'That character is not from this server.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'That character is not from this server.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id && !isGm) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 
@@ -410,82 +413,82 @@ module.exports = {
 
 				const updated = await updateCharacter({ id: record.id, patch });
 				const embed = await renderCharacterSheetEmbed(updated);
-				await interaction.reply({ content: 'Modified character.', embeds: [embed], ephemeral: true });
+				await replyEphemeral(interaction, { content: 'Modified character.', embeds: [embed], ephemeral: true });
 				return;
 			}
 
 			if (group === 'condition' && sub === 'add') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char condition add`.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char condition add`.', ephemeral: true });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
 					const name = interaction.options.getString('name');
 					setPending(interaction.user.id, { action: 'cond_add', payload: { name } });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'cond_add' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: record.target, matches: record.matches, action: 'cond_add' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${record.target}**.`, ephemeral: true });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id && !isGm) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 				const name = interaction.options.getString('name');
 				await addCondition({ characterId: record.id, name });
 				const updated = await getCharacterById({ id: record.id });
 				const embed = await renderCharacterSheetEmbed(updated);
-				await interaction.reply({ content: `Added condition: **${name}**`, embeds: [embed], ephemeral: true });
+				await replyEphemeral(interaction, { content: `Added condition: **${name}**`, embeds: [embed], ephemeral: true });
 				return;
 			}
 
 			if (group === 'condition' && sub === 'remove') {
 				const record = await resolveCharRecord();
 				if (!record) {
-					await interaction.reply({ content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char condition remove`.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set. Use `/char active target:<name|id>` or pass a target to `/char condition remove`.', ephemeral: true });
 					return;
 				}
 				if (record.kind === 'ambiguous') {
 					const name = interaction.options.getString('name');
 					setPending(interaction.user.id, { action: 'cond_remove', payload: { name } });
-					await interaction.reply(disambiguationMessage({ target: record.target, matches: record.matches, action: 'cond_remove' }));
+					await replyEphemeral(interaction, disambiguationMessage({ target: record.target, matches: record.matches, action: 'cond_remove' }));
 					return;
 				}
 				if (record.kind === 'none') {
-					await interaction.reply({ content: `No character found matching **${record.target}**.`, ephemeral: true });
+					await replyEphemeral(interaction, { content: `No character found matching **${record.target}**.`, ephemeral: true });
 					return;
 				}
 				if (record.kind === 'missing') {
-					await interaction.reply({ content: 'No active character set.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'No active character set.', ephemeral: true });
 					return;
 				}
 				if (record.owner_user_id !== interaction.user.id && !isGm) {
-					await interaction.reply({ content: 'You do not own that character.', ephemeral: true });
+					await replyEphemeral(interaction, { content: 'You do not own that character.', ephemeral: true });
 					return;
 				}
 				const name = interaction.options.getString('name');
 				const res = await removeCondition({ characterId: record.id, name });
 				const updated = await getCharacterById({ id: record.id });
 				const embed = await renderCharacterSheetEmbed(updated);
-				await interaction.reply({ content: `Removed condition: **${name}** (removed ${res.deleted})`, embeds: [embed], ephemeral: true });
+				await replyEphemeral(interaction, { content: `Removed condition: **${name}** (removed ${res.deleted})`, embeds: [embed], ephemeral: true });
 				return;
 			}
 
-			await interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
+			await replyEphemeral(interaction, { content: 'Unknown subcommand.', ephemeral: true });
 		}
 		catch (err) {
 			// PocketBase client throws errors with status/data that are useful for debugging.
 			const status = err?.status ? ` (status ${err.status})` : '';
 			const detail = err?.data ? `\n${JSON.stringify(err.data)}` : '';
 			const url = err?.url ? `\nurl: ${err.url}` : '';
-			await interaction.reply({ content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
+			await replyEphemeral(interaction, { content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
 		}
 	},
 
@@ -805,9 +808,9 @@ function buildWizardStep(interaction, step) {
 		let availableList = '';
 		if (availableSlice.length && step.maxPicks > 0) {
 			availableList = '\n\n**Available moves:**\n' + availableSlice.map(m => {
-			const t = triggerFor(m.name);
-			return t ? `• ${link(m.name)} — ${truncate(t, PREVIEW_CHARS)}` : `• ${link(m.name)}`;
-		}).join('\n');
+				const t = triggerFor(m.name);
+				return t ? `• ${link(m.name)} — ${truncate(t, PREVIEW_CHARS)}` : `• ${link(m.name)}`;
+			}).join('\n');
 		}
 
 		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}${availableList}`;

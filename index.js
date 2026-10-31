@@ -4,6 +4,19 @@ const { REST, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
+// --- Crash guards -----------------------------------------------------------
+// A single unhandled error (e.g. DiscordAPIError 10062 "Unknown interaction"
+// from a late reply) would otherwise emit an 'error' event on the Client, and
+// an unhandled 'error' event takes down the whole process. That turned one slow
+// interaction into a ~30s outage during which EVERY interaction failed. We log
+// loudly instead of exiting.
+process.on('unhandledRejection', (reason) => {
+	console.error('[unhandledRejection]', reason);
+});
+process.on('uncaughtException', (err) => {
+	console.error('[uncaughtException]', err);
+});
+
 const deployCommands = async () => {
 	try {
 		if (!process.env.BOT_TOKEN) throw new Error('BOT_TOKEN is required');
@@ -78,7 +91,7 @@ const { buildSheetButtons } = require('./lib/sheet_buttons');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, setTraitPage, setTraitSlot, clearTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
-const { replyEphemeral, updateClearComponents, handleError } = require('./lib/interaction_helpers');
+const { replyEphemeral, updateClearComponents, handleError, deferComponentUpdate, deferEphemeralReply } = require('./lib/interaction_helpers');
 const { lookupPlaybook, renderCharacterMoves } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
@@ -178,6 +191,12 @@ const client = new Client({
 
 client.commands = new Collection();
 
+// Never let a stray Client 'error' event crash the process (see crash guards
+// at the top of the file). Log and keep serving.
+client.on(Events.Error, err => {
+	console.error('[client error]', err);
+});
+
 const commandsPath = path.join(__dirname, 'commands');
 const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
 
@@ -233,6 +252,7 @@ client.on(Events.InteractionCreate, async interaction => {
 	// === Notes edit modal: rhune:notes:edit:<charId> ===
 	if (interaction.isModalSubmit() && interaction.customId.startsWith('rhune:notes:edit:')) {
 		try {
+			await deferEphemeralReply(interaction);
 			const charId = interaction.customId.slice('rhune:notes:edit:'.length);
 			const record = await getCharacterById({ id: charId });
 
@@ -259,7 +279,7 @@ client.on(Events.InteractionCreate, async interaction => {
 			});
 
 			const { embeds, components } = buildNotesView(record, text);
-			await interaction.reply({ embeds, components, ephemeral: true });
+			await interaction.editReply({ embeds, components });
 		}
 		catch (err) {
 			handleError(interaction, err);
@@ -344,6 +364,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// === Moves from sheet button ===
 		if (interaction.customId.startsWith('rhune:move:sheet:')) {
 			try {
+				await deferEphemeralReply(interaction);
 				const charId = interaction.customId.slice('rhune:move:sheet:'.length);
 				const record = await getCharacterById({ id: charId });
 
@@ -358,14 +379,14 @@ client.on(Events.InteractionCreate, async interaction => {
 				if (record.playbook && lookupPlaybook(record.playbook)) {
 					const embeds = renderCharacterMoves(record);
 					if (embeds) {
-						await interaction.reply({ embeds, components: [browseRow], ephemeral: true });
+						await interaction.editReply({ embeds, components: [browseRow] });
 						return;
 					}
 				}
 
 				// Fallback: no playbook — show the full move reference root.
 				const view = buildMoveReferenceRoot();
-				await interaction.reply({ embeds: view.embeds, components: view.components, ephemeral: true });
+				await interaction.editReply({ embeds: view.embeds, components: view.components });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -408,6 +429,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Notes button: rhune:notes:<charId> — show freeform notes.
 		if (interaction.customId.startsWith('rhune:notes:')) {
 			try {
+				await deferEphemeralReply(interaction);
 				const charId = interaction.customId.slice('rhune:notes:'.length);
 				const record = await getCharacterById({ id: charId });
 
@@ -422,7 +444,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 				const text = await getNotesText({ characterId: record.id, guildId: interaction.guildId });
 				const { embeds, components } = buildNotesView(record, text);
-				await interaction.reply({ embeds, components, ephemeral: true });
+				await interaction.editReply({ embeds, components });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -431,10 +453,15 @@ client.on(Events.InteractionCreate, async interaction => {
 		}
 
 		// Edit-notes button: rhune:notesedit:<charId> — open the notes modal.
+		// NOTE: a modal must be the FIRST response, so we cannot defer here. Keep
+		// the pre-modal work to a single parallel fetch to stay under 3s.
 		if (interaction.customId.startsWith('rhune:notesedit:')) {
 			try {
 				const charId = interaction.customId.slice('rhune:notesedit:'.length);
-				const record = await getCharacterById({ id: charId });
+				const [record, text] = await Promise.all([
+					getCharacterById({ id: charId }),
+					getNotesText({ characterId: charId, guildId: interaction.guildId }),
+				]);
 
 				if (record.guild_id !== interaction.guildId) {
 					await replyEphemeral(interaction, 'That character is not from this server.');
@@ -445,7 +472,6 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				const text = await getNotesText({ characterId: record.id, guildId: interaction.guildId });
 				await interaction.showModal(buildNotesModal(record.id, text));
 			}
 			catch (err) {
@@ -457,6 +483,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Edit button: rhune:edit:<charId>
 		if (interaction.customId.startsWith('rhune:edit:')) {
 			try {
+				await deferEphemeralReply(interaction);
 				const charId = interaction.customId.slice('rhune:edit:'.length);
 				const record = await getCharacterById({ id: charId });
 
@@ -471,10 +498,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
 				const { editEmbed, editComponents } = buildEditView(record);
 
-				await interaction.reply({
+				await interaction.editReply({
 					embeds: [editEmbed],
 					components: editComponents,
-					ephemeral: true,
 				});
 			}
 			catch (err) {
@@ -486,6 +512,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Edit HP: rhune:edithp:<charId>:+
 		if (interaction.customId.startsWith('rhune:edithp:')) {
 			try {
+				await deferComponentUpdate(interaction);
 				const parts = interaction.customId.split(':');
 				const charId = parts[2];
 				const delta = parts[3] === '+' ? 1 : -1;
@@ -507,7 +534,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				// Re-render the edit view
 				const updated = await getCharacterById({ id: charId });
 				const { editEmbed, editComponents } = buildEditView(updated);
-				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
+				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -518,6 +545,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Edit XP: rhune:editxp:<charId>:+
 		if (interaction.customId.startsWith('rhune:editxp:')) {
 			try {
+				await deferComponentUpdate(interaction);
 				const parts = interaction.customId.split(':');
 				const charId = parts[2];
 				const delta = parts[3] === '+' ? 1 : -1;
@@ -538,7 +566,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 				const updated = await getCharacterById({ id: charId });
 				const { editEmbed, editComponents } = buildEditView(updated);
-				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
+				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -549,6 +577,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Edit debility: rhune:editdebil:<charId>:<DebilityName>
 		if (interaction.customId.startsWith('rhune:editdebil:')) {
 			try {
+				await deferComponentUpdate(interaction);
 				const parts = interaction.customId.split(':');
 				const charId = parts[2];
 				const debilName = parts.slice(3).join(':');
@@ -577,7 +606,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 				const updated = await getCharacterById({ id: charId });
 				const { editEmbed, editComponents } = buildEditView(updated);
-				await interaction.update({ embeds: [editEmbed], components: editComponents, flags: 64 });
+				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -588,6 +617,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		// Edit done: rhune:editdone:<charId>
 		if (interaction.customId.startsWith('rhune:editdone:')) {
 			try {
+				await deferComponentUpdate(interaction);
 				const charId = interaction.customId.slice('rhune:editdone:'.length);
 				const record = await getCharacterById({ id: charId });
 				const embed = await renderCharacterSheetEmbed(record);
@@ -595,7 +625,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
 				const row = buildSheetButtons(record);
 
-				await interaction.update({ embeds: [embed], components: [row], flags: 64 });
+				await interaction.editReply({ embeds: [embed], components: [row] });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -740,6 +770,8 @@ client.on(Events.InteractionCreate, async interaction => {
 		if (!parsed) return;
 
 		try {
+			// Ack within Discord's 3s window before the PocketBase work below.
+			await deferComponentUpdate(interaction);
 			const pending = getPending(interaction.user.id);
 			if (!pending || pending.action !== parsed.action) {
 				await replyEphemeral(interaction, 'That selection has expired. Please re-run the command.');
@@ -778,7 +810,7 @@ client.on(Events.InteractionCreate, async interaction => {
 				return;
 			}
 
-			await interaction.reply({ content: 'Unknown action.', ephemeral: true });
+			await replyEphemeral(interaction, 'Unknown action.');
 		}
 		catch (err) {
 			handleError(interaction, err);

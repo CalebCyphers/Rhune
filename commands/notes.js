@@ -3,7 +3,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { getCharacterById, getActiveCharacterId } = require('../lib/characters_pb');
 const { getNotesText, upsertNotes } = require('../lib/notes_state_pb');
 const { buildNotesView, NOTES_INPUT_LIMIT } = require('../lib/notes_view');
-const { replyEphemeral, requireGuild } = require('../lib/interaction_helpers');
+const { replyEphemeral, requireGuild, deferCommand } = require('../lib/interaction_helpers');
 
 // NOTE: a slash command may NOT mix top-level options with subcommands —
 // Discord rejects that with "Invalid Form Body". So /notes is flat:
@@ -37,6 +37,9 @@ module.exports = {
 		try {
 			requireGuild(interaction);
 
+			// Ack within Discord's 3s window before any PocketBase work.
+			await deferCommand(interaction);
+
 			const record = await resolveCharRecord(interaction);
 			if (!record) {
 				await replyEphemeral(interaction, 'No active character set. Use `/char active target:<name|id>` or pass a character id to `/notes`.');
@@ -63,14 +66,14 @@ module.exports = {
 				});
 
 				const { embeds, components } = buildNotesView(record, text);
-				await interaction.reply({ embeds, components, ephemeral: true });
+				await interaction.editReply({ embeds, components });
 				return;
 			}
 
 			// No text given: view (the view carries the Edit-notes modal button).
 			const text = await getNotesText({ characterId: record.id, guildId: interaction.guildId });
 			const { embeds, components } = buildNotesView(record, text);
-			await interaction.reply({ embeds, components, ephemeral: true });
+			await interaction.editReply({ embeds, components });
 		}
 		catch (err) {
 			const status = err?.status ? ` (status ${err.status})` : '';

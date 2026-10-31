@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 //  - disambiguation + pending actions
 //  - active character clearing on delete
 //  - correct reply style (ephemeral) and basic message content
-const { makeInteraction, assertRepliedEphemeral } = require('../helpers');
+const { makeInteraction, responseOf, assertEphemeralAck } = require('../helpers');
 
 function makeStubs(overrides = {}) {
 	const calls = {
@@ -108,9 +108,8 @@ test('char: blocks outside guild', async () => {
 	try {
 		const { interaction, calls } = makeInteraction({ guildId: null, subcommand: 'list' });
 		await charCmd.execute(interaction);
-		assert.equal(calls.reply.length, 1);
-		assertRepliedEphemeral(calls.reply[0]);
-		assert.match(calls.reply[0].content, /only works inside a server/i);
+		assertEphemeralAck(calls);
+		assert.match(responseOf(calls).content, /only works inside a server/i);
 	}
 	finally { restoreAll(); }
 });
@@ -123,9 +122,8 @@ test('char list: non-GM cannot list all', async () => {
 	try {
 		const { interaction, calls } = makeInteraction({ subcommand: 'list', options: { all: true } });
 		await charCmd.execute(interaction);
-		assert.equal(calls.reply.length, 1);
-		assertRepliedEphemeral(calls.reply[0]);
-		assert.match(calls.reply[0].content, /only the guild owner/i);
+		assertEphemeralAck(calls);
+		assert.match(responseOf(calls).content, /only the guild owner/i);
 		assert.equal(stubs.calls.listCharacters.length, 0);
 	}
 	finally { restoreAll(); }
@@ -146,9 +144,9 @@ test('char list: GM can list all and sees owners + active marker', async () => {
 		await charCmd.execute(interaction);
 		assert.equal(stubs.calls.listCharacters.length, 1);
 		assert.deepEqual(stubs.calls.listCharacters[0], { guildId: 'guild1', ownerUserId: null });
-		assert.equal(calls.reply.length, 1);
-		assert.match(calls.reply[0].content, /<@u2>/);
-		assert.match(calls.reply[0].content, /\(active\)/);
+		assertEphemeralAck(calls);
+		assert.match(responseOf(calls).content, /<@u2>/);
+		assert.match(responseOf(calls).content, /\(active\)/);
 	}
 	finally { restoreAll(); }
 });
@@ -163,8 +161,7 @@ test('char active: ambiguous target -> sets pending and replies disambiguation',
 		await charCmd.execute(interaction);
 		assert.equal(stubs.calls.setPending.length, 1);
 		assert.equal(stubs.calls.setPending[0].payload.action, 'active');
-		assert.equal(calls.reply.length, 1);
-		assert.match(calls.reply[0].content, /ambiguous:active/);
+		assert.match(responseOf(calls).content, /ambiguous:active/);
 	}
 	finally { restoreAll(); }
 });
@@ -177,8 +174,7 @@ test('char active: ok target but owner mismatch -> blocked', async () => {
 	try {
 		const { interaction, calls } = makeInteraction({ subcommand: 'active', options: { target: 'A' } });
 		await charCmd.execute(interaction);
-		assert.equal(calls.reply.length, 1);
-		assert.match(calls.reply[0].content, /do not own/i);
+		assert.match(responseOf(calls).content, /do not own/i);
 		assert.equal(stubs.calls.setActiveCharacter.length, 0);
 	}
 	finally { restoreAll(); }
@@ -196,8 +192,7 @@ test('char delete: if deleting active, clears mapping first', async () => {
 		assert.equal(stubs.calls.setActiveCharacter.length, 1);
 		assert.deepEqual(stubs.calls.setActiveCharacter[0], { guildId: 'guild1', userId: 'user1', characterId: null });
 		assert.equal(stubs.calls.deleteCharacter.length, 1);
-		assert.equal(calls.reply.length, 1);
-		assert.match(calls.reply[0].content, /Deleted character/i);
+		assert.match(responseOf(calls).content, /Deleted character/i);
 	}
 	finally { restoreAll(); }
 });

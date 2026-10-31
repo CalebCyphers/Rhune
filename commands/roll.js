@@ -5,6 +5,7 @@ const { exprResultEmbed, poolEmbed, communityEmbed, withRollId } = require('../l
 const { logRoll } = require('../lib/rolllog_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
 const { renderD6Strip, renderDiceStrip } = require('../lib/pool_strip');
+const { deferComponentUpdate } = require('../lib/interaction_helpers');
 
 // ─── Attachments ─────────────────────────────────────────────
 
@@ -209,6 +210,9 @@ function buildRollBuilder(state = { sides: 6, count: 1, mode: 'normal' }) {
 
 /** Post a finished roll to the channel (shared by the builder's paths). */
 async function postRollResult(interaction, { result, embed, components, expr, mode }) {
+	// Ack the button within Discord's 3s window before the PocketBase write.
+	await deferComponentUpdate(interaction);
+
 	const rollId = await logRoll({
 		guildId: interaction.guildId,
 		channelId: interaction.channelId,
@@ -227,15 +231,15 @@ async function postRollResult(interaction, { result, embed, components, expr, mo
 		if (!channel?.isTextBased?.()) throw new Error('Channel is not text-based.');
 		try {
 			await channel.send(payload);
-			await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
+			await interaction.editReply({ content: '✅ Rolled!', embeds: [], components: [] });
 		}
 		catch (err) {
 			console.error('Roll public post failed:', err?.message || err);
-			await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+			await interaction.editReply({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components });
 		}
 	}
 	else {
-		await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+		await interaction.editReply({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components });
 	}
 	return result;
 }
@@ -285,6 +289,9 @@ async function executeBuilderRoll(interaction, state) {
  * the result to the channel. Shared by the quick menu and the reroll buttons.
  */
 async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls = null }) {
+	// Ack the button within Discord's 3s window before the PocketBase write.
+	await deferComponentUpdate(interaction);
+
 	const result = keptRolls
 		? poolFromRolls(keptRolls, { count: keptRolls.length, mode: 'normal' })
 		: rollPool({ count, mode });
@@ -307,15 +314,15 @@ async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls 
 		if (!channel?.isTextBased?.()) throw new Error('Channel is not text-based.');
 		try {
 			await channel.send(payload);
-			await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
+			await interaction.editReply({ content: '✅ Rolled!', embeds: [], components: [] });
 		}
 		catch (err) {
 			console.error('Pool roll public post failed:', err?.message || err);
-			await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+			await interaction.editReply({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components });
 		}
 	}
 	else {
-		await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+		await interaction.editReply({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components });
 	}
 	return result;
 }
