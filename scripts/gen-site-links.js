@@ -176,13 +176,14 @@ const settingUrl = titleMap(groups.setting);
 const steadingUrl = titleMap(groups.steading);
 
 // ---------------------------------------------------------------------------
-// Primer anchors (traits + the core-moves list live in HOW-TO-PLAY)
+// Primer anchors (the core-moves list lives in HOW-TO-PLAY; traits now live
+// in their own top-level page).
 
 const primer = read('HOW-TO-PLAY.md');
-const traitListAnchor = /^###\s+The trait list\b/m.test(primer) ? '#the-trait-list' : '';
 // NOTE: GitHub Pages is case-sensitive; the primer ships as HOW-TO-PLAY.html.
-const TRAIT_LIST_URL = traitListAnchor ? `${BASE}/HOW-TO-PLAY.html${traitListAnchor}` : `${BASE}/HOW-TO-PLAY.html`;
 const HOW_TO_PLAY_URL = `${BASE}/HOW-TO-PLAY.html`;
+// Traits moved out of the primer into RULES/traits.md -> /traits.html.
+const TRAIT_LIST_URL = `${BASE}/traits.html`;
 
 // ---------------------------------------------------------------------------
 // Emit

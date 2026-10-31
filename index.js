@@ -77,14 +77,15 @@ const { buildSheetButtons } = require('./lib/sheet_buttons');
 const siteLinks = require('./lib/site_links');
 const { triggerFor } = require('./lib/move_triggers');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, browseSpecies, toggleTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, setTraitPage, toggleTrait, clearTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents, handleError } = require('./lib/interaction_helpers');
 const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
 const { isGuildOwner } = require('./lib/gm');
-const { moves, categoryNames, getCategoryLabel, getCategoryEmoji, getMove, buildMoveNav, buildMovePicker } = require('./lib/moves_data');
+const { moves, categoryNames, getCategoryLabel } = require('./lib/moves_data');
+const { buildMoveReferenceRoot, buildMoveCategoryView } = require('./lib/move_views');
 const { splitIntoChunks, tagPagination } = require('./lib/embed_pager');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
@@ -438,34 +439,9 @@ client.on(Events.InteractionCreate, async interaction => {
 					}
 				}
 
-				// Fallback: no playbook — show full reference
-				const embed = new EmbedBuilder()
-					.setTitle('📖 Move Reference')
-					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
-
-				const rows = categoryNames.map(cat => {
-					const catMoves = moves[cat];
-					const count = Object.keys(catMoves).length;
-					return {
-						name: getCategoryLabel(cat),
-						value: count + ' move' + (count === 1 ? '' : 's'),
-						inline: false,
-					};
-				});
-
-				embed.addFields(rows);
-
-				const backToCategories = new ActionRowBuilder()
-					.addComponents(
-						...categoryNames.map(cat =>
-							new ButtonBuilder()
-								.setCustomId('rhune:move:cat:' + cat)
-								.setLabel(getCategoryLabel(cat))
-								.setStyle(ButtonStyle.Secondary),
-						),
-					);
-
-				await interaction.reply({ embeds: [embed], components: [backToCategories], ephemeral: true });
+				// Fallback: no playbook — show the full move reference root.
+				const view = buildMoveReferenceRoot();
+				await interaction.reply({ embeds: view.embeds, components: view.components, ephemeral: true });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -476,33 +452,8 @@ client.on(Events.InteractionCreate, async interaction => {
 		// === Browse full move reference button ===
 		if (interaction.customId === 'rhune:move:reference') {
 			try {
-				const embed = new EmbedBuilder()
-					.setTitle('📖 Move Reference')
-					.setDescription('Choose a category below to view its moves, then select a specific move to read its details.');
-
-				const rows = categoryNames.map(cat => {
-					const catMoves = moves[cat];
-					const count = Object.keys(catMoves).length;
-					return {
-						name: getCategoryLabel(cat),
-						value: count + ' move' + (count === 1 ? '' : 's'),
-						inline: false,
-					};
-				});
-
-				embed.addFields(rows);
-
-				const backToCategories = new ActionRowBuilder()
-					.addComponents(
-						...categoryNames.map(cat =>
-							new ButtonBuilder()
-								.setCustomId('rhune:move:cat:' + cat)
-								.setLabel(getCategoryLabel(cat))
-								.setStyle(ButtonStyle.Secondary),
-						),
-					);
-
-				await interaction.update({ embeds: [embed], components: [backToCategories], flags: 64 });
+				const view = buildMoveReferenceRoot();
+				await interaction.update({ embeds: view.embeds, components: view.components, flags: 64 });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -511,25 +462,17 @@ client.on(Events.InteractionCreate, async interaction => {
 		}
 
 		// === Move reference buttons ===
-		// rhune:move:cat:<category> — show category overview + move picker
+		// rhune:move:cat:<category> — list the category's moves as site links
 		if (interaction.customId.startsWith('rhune:move:cat:')) {
 			try {
 				const category = interaction.customId.slice('rhune:move:cat:'.length);
-				const catMoves = moves[category];
-				if (!catMoves) {
+				if (!moves[category]) {
 					await replyEphemeral(interaction, 'Invalid category.');
 					return;
 				}
 
-				const moveNames = Object.keys(catMoves);
-				const embed = new EmbedBuilder()
-					.setTitle(getCategoryLabel(category))
-					.setDescription(`${moveNames.length} move${moveNames.length === 1 ? '' : 's'} — select one from the dropdown below to read its full details.`);
-
-				const pickerRow = buildMovePicker(category);
-				const navRow = buildMoveNav();
-
-				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
+				const view = buildMoveCategoryView(category);
+				await interaction.update({ embeds: view.embeds, components: view.components, flags: 64 });
 			}
 			catch (err) {
 				handleError(interaction, err);
@@ -748,11 +691,14 @@ client.on(Events.InteractionCreate, async interaction => {
 				case 'togglemove':
 					toggleMove(wizardId, value);
 					break;
-				case 'browsespecies':
-					browseSpecies(wizardId, value);
+				case 'traitpage':
+					setTraitPage(wizardId, value);
 					break;
 				case 'toggletrait':
 					toggleTrait(wizardId, value);
+					break;
+				case 'cleartrait':
+					clearTrait(wizardId, value);
 					break;
 				case 'togglepossession':
 					togglePossession(wizardId, value);
@@ -934,62 +880,7 @@ client.on(Events.InteractionCreate, async interaction => {
 	}
 
 
-	// === Move reference select menus ===
-	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:move:')) {
-		try {
-			// rhune:move:pickcategory — jump to a category
-			if (interaction.customId === 'rhune:move:pickcategory') {
-				const category = interaction.values[0];
-				const catMoves = moves[category];
-				if (!catMoves) {
-					await replyEphemeral(interaction, 'Invalid category.');
-					return;
-				}
-
-				const moveNames = Object.keys(catMoves);
-				const embed = new EmbedBuilder()
-					.setTitle(getCategoryLabel(category))
-					.setDescription(`${moveNames.length} move${moveNames.length === 1 ? '' : 's'} — select one from the dropdown below to read its full details.`);
-
-				const pickerRow = buildMovePicker(category);
-				const navRow = buildMoveNav();
-
-				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
-				return;
-			}
-
-			// rhune:move:pickmove:<category> — show a specific move
-			if (interaction.customId.startsWith('rhune:move:pickmove:')) {
-				const category = interaction.customId.slice('rhune:move:pickmove:'.length);
-				const moveName = interaction.values[0];
-				const moveData = getMove(category, moveName);
-				if (!moveData) {
-					await replyEphemeral(interaction, 'Move not found.');
-					return;
-				}
-
-				const moveUrl = siteLinks.moveUrl(moveName, null);
-				const trigger = triggerFor(moveName);
-				const lines = [];
-				if (trigger) lines.push(trigger);
-				lines.push(moveUrl ? `[Read the full move ↗](${moveUrl})` : '*Not on the site yet.*');
-				const emoji = getCategoryEmoji(category);
-				const embed = new EmbedBuilder()
-					.setTitle(emoji ? `${moveName} ${emoji}` : moveName)
-					.setDescription(lines.join('\n\n'));
-
-				const pickerRow = buildMovePicker(category);
-				const navRow = buildMoveNav();
-
-				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
-				return;
-			}
-		}
-		catch (err) {
-			handleError(interaction, err);
-		}
-		return;
-	}
+	// (Move detail view retired — move names now link straight to the rules site.)
 
 	// === Creation wizard select menus ===
 	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:create:')) {
@@ -1005,6 +896,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
 			if (interaction.customId === 'rhune:create:selectmove') {
 				wizard.chosenMoves = interaction.values;
+			}
+			else if (interaction.customId === 'rhune:create:picktrait') {
+				toggleTrait(wizardId, interaction.values[0]);
 			}
 			else if (interaction.customId.startsWith('rhune:create:orchoice:')) {
 				const parts = interaction.customId.split(':');

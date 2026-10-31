@@ -624,27 +624,31 @@ ${link}` : ''),
 	}
 
 	case 'traits_picker': {
-		const speciesOrder = step.speciesOrder || [];
-		const current = step.species;
+		const all = step.allTraits || [];
 		const chosen = step.chosen || [];
 		const remaining = step.remaining;
 		const pickCount = step.pickCount || 2;
+		const page = step.page || 0;
+		const pageSize = step.pageSize || 24;
+		const pageCount = step.pageCount || 1;
 
-		const chosenBlock = chosen.length
-			? chosen.map(n => {
-				const t = step.traits.find(x => x.name === n);
-				return `• **${n}** — ${t ? t.text : ''}`;
-			}).join('\n')
-			: '_None yet._';
+		const slot = (i) => {
+			const n = chosen[i];
+			if (!n) return `Slot ${i + 1}: _empty_`;
+			const t = all.find(x => x.name === n);
+			return `Slot ${i + 1}: **${n}**${t ? ` — ${t.text}` : ''}`;
+		};
 
-		const desc = `Pick **${pickCount} traits** from the shared list. Traits aren't locked to a species — pick anything, but be ready to **explain how it applies to you**.
+		const pageTraits = all.slice(page * pageSize, page * pageSize + pageSize);
+
+		const desc = `Pick **${pickCount} traits** — any two from the list. Traits aren't locked to a species; pick anything, but be ready to **explain how it applies to you**.
+` +
+			`[See the full trait list on the rules site →](${siteLinks.TRAIT_LIST_URL})
 
 ` +
-			`Browse species below, then toggle traits on. You can rename or rewrite them later on your sheet.\n` +
-			`[See the full trait list on the rules site →](${siteLinks.TRAIT_LIST_URL})\n\n` +
-			`**${current}** *(${step.flavor || ''})*\n` +
-			step.traits.map(t => `• **${t.name}** — ${t.text}`).join('\n') +
-			`\n\n**Picked (${chosen.length}/${pickCount})**\n${chosenBlock}`;
+			`${slot(0)}\n${slot(1)}\n\n` +
+			`**Traits ${page * pageSize + 1}–${Math.min(all.length, (page + 1) * pageSize)} of ${all.length}**` +
+			(pageCount > 1 ? ` *(page ${page + 1}/${pageCount})*` : '');
 
 		const embed = new EmbedBuilder()
 			.setTitle('Pick Your Traits')
@@ -652,29 +656,52 @@ ${link}` : ''),
 
 		const rows = [];
 
-		// Species select menu
-		const speciesMenu = new StringSelectMenuBuilder()
-			.setCustomId('rhune:create:selectspecies')
-			.setPlaceholder('Browse a species…')
-			.addOptions(speciesOrder.map(sp => ({
-				label: sp,
-				value: sp,
-				default: sp === current,
-			})));
-		rows.push(new ActionRowBuilder().addComponents(speciesMenu));
-
-		// Trait toggle buttons
-		const traitRow = new ActionRowBuilder();
-		step.traits.forEach(t => {
+		// One paged dropdown — choosing fills the first open slot.
+		const traitMenu = new StringSelectMenuBuilder()
+			.setCustomId('rhune:create:picktrait')
+			.setPlaceholder('Add a trait…')
+			.setMinValues(1)
+			.setMaxValues(1);
+		traitMenu.addOptions(pageTraits.map(t => {
 			const isChosen = chosen.includes(t.name);
-			traitRow.addComponents(
+			const opt = new StringSelectMenuOptionBuilder()
+				.setLabel(isChosen ? `✓ ${t.name}` : t.name)
+				.setValue(t.name);
+			if (t.text) opt.setDescription(t.text.substring(0, 100));
+			if (isChosen) opt.setDefault(true);
+			return opt;
+		}));
+		rows.push(new ActionRowBuilder().addComponents(traitMenu));
+
+		// Paging row (only when there's more than one page).
+		if (pageCount > 1) {
+			rows.push(new ActionRowBuilder().addComponents(
 				new ButtonBuilder()
-					.setCustomId(`rhune:create:toggletrait:${t.name}`)
-					.setLabel(`${isChosen ? '✓ ' : ''}${t.name}`)
-					.setStyle(isChosen ? ButtonStyle.Success : ButtonStyle.Secondary),
-			);
-		});
-		rows.push(traitRow);
+					.setCustomId(`rhune:create:traitpage:${page - 1}`)
+					.setLabel('◂ Back')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(page <= 0),
+				new ButtonBuilder()
+					.setCustomId(`rhune:create:traitpage:${page + 1}`)
+					.setLabel('More traits ▸')
+					.setStyle(ButtonStyle.Secondary)
+					.setDisabled(page >= pageCount - 1),
+			));
+		}
+
+		// Slot-clear row (only if something is picked).
+		if (chosen.length) {
+			const clearRow = new ActionRowBuilder();
+			chosen.forEach((n, i) => {
+				clearRow.addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:create:cleartrait:${i}`)
+						.setLabel(`Clear slot ${i + 1}`)
+						.setStyle(ButtonStyle.Danger),
+				);
+			});
+			rows.push(clearRow);
+		}
 
 		// Navigation row
 		rows.push(new ActionRowBuilder().addComponents(
@@ -697,11 +724,17 @@ ${link}` : ''),
 	}
 
 	case 'moves_picker': {
-		// Show auto-granted moves with their "when" trigger (mechanics live on the site).
+		// Move names link to their own entry on the rules site; mechanics live there.
+		const link = (name) => {
+			const url = siteLinks.moveUrl(name, step.playbookKey);
+			return url ? `[${name}](${url})` : `**${name}**`;
+		};
+
+		// Show auto-granted moves with their "when" trigger.
 		let grantList = '';
 		step.autoGranted.forEach(m => {
 			const t = triggerFor(m);
-			grantList += t ? `• **${m}** — ${t}\n` : `• **${m}**\n`;
+			grantList += t ? `• ${link(m)} — ${t}\n` : `• ${link(m)}\n`;
 		});
 
 		let orStatus = '';
@@ -714,7 +747,7 @@ ${link}` : ''),
 					// Show each granted move with its trigger.
 					pkg.grants.forEach(m => {
 						const t = triggerFor(m);
-						orStatus += t ? `\n  ✓ **${m}** — ${t}` : `\n  ✓ **${m}**`;
+						orStatus += t ? `\n  ✓ ${link(m)} — ${t}` : `\n  ✓ ${link(m)}`;
 					});
 				}
 				else {
@@ -731,7 +764,7 @@ ${link}` : ''),
 		if (step.currentPicks > 0) {
 			step.chosenMoves.forEach(m => {
 				const t = triggerFor(m);
-				chosenMovesList += t ? `\n  ✓ **${m}** — ${t}` : `\n  ✓ **${m}**`;
+				chosenMovesList += t ? `\n  ✓ ${link(m)} — ${t}` : `\n  ✓ ${link(m)}`;
 			});
 		}
 		let remainingText = chosenMovesList ? `**Selected moves:**${chosenMovesList}` : '';
@@ -748,19 +781,24 @@ ${link}` : ''),
 		const overflow = Math.max(0, step.available.length - optionLimit);
 		const availableSlice = step.available.slice(0, optionLimit);
 		if (overflow > 0) {
-			remainingText += `\n\n_(${overflow} more moves available — browse with \`/move\` after creation.)_`;
+			remainingText += `\n\n_(${overflow} more moves available — browse with \`/moves\` after creation.)_`;
 		}
 
-		// Deep link to the playbook's Moves section on the rules site.
-		const movesSectionUrl = siteLinks.playbookMovesUrl(step.playbookKey);
-		const movesLink = movesSectionUrl ? `
-[Browse the full move list →](${movesSectionUrl})` : '';
+		// Every available move as a link (+ trigger) so players can read up
+		// before picking. Names are the links; the dropdown lists names only.
+		let availableList = '';
+		if (availableSlice.length && step.maxPicks > 0) {
+			availableList = '\n\n**Available moves:**\n' + availableSlice.map(m => {
+			const t = triggerFor(m.name);
+			return t ? `• ${link(m.name)} — ${t}` : `• ${link(m.name)}`;
+		}).join('\n');
+		}
 
-		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}${movesLink}`;
+		const embedDesc = `**Automatically granted:**\n${grantList}${orStatus}\n\n${remainingText}${availableList}`;
 
 		const embed = new EmbedBuilder()
 			.setTitle('Choose Your Starting Moves')
-			.setDescription(embedDesc);
+			.setDescription(embedDesc.slice(0, 4096));
 
 		const rows = [];
 
@@ -801,11 +839,9 @@ ${link}` : ''),
 
 			availableSlice.forEach(m => {
 				const isChosen = step.chosenMoves.includes(m.name);
-				const t = triggerFor(m.name);
 				const opt = new StringSelectMenuOptionBuilder()
 					.setLabel(isChosen ? `✓ ${m.name}` : m.name)
 					.setValue(m.name);
-				if (t) opt.setDescription(t.substring(0, 100));
 				if (isChosen) {
 					opt.setDefault(true);
 				}

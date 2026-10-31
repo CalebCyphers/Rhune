@@ -28,8 +28,9 @@ const normalize = s => String(s == null ? '' : s).toLowerCase()
 // Keyed by normalized move name.
 const OVERRIDES = {
 	"death's door": "When you're dying (0 HP from a killing blow)",
-	'advantage disadvantage': 'When you roll with advantage or disadvantage',
+	'advantage disadvantage': 'Advantage: roll an extra die and discard the lowest. Disadvantage: roll an extra die and discard the highest. They cancel out — you either have it or you don\u2019t.',
 	"seasons change": 'When spring bursts forth upon the land… when the hot days of summer settle across the land… when autumn falls and the land is ripe for harvest… when winter grips the land…',
+	'chart a course': 'When you wish to travel to a distant place, name or describe your destination. If the route is unclear, tell the GM how you intend to reach it…',
 };
 
 // Overrides keyed by normalized name (so apostrophes/punctuation don't matter).
@@ -63,16 +64,23 @@ const stripInline = t => t
 	.trim();
 
 /** Trim trailing instruction cruft from a trigger clause:
- *  - a trailing ", roll." (only when a comma precedes it, so "— or roll." survives)
  *  - a trailing "…, they pick 1:" list-intro
- *  - a dangling colon and final period. */
+ *  - a dangling colon
+ *  Keep the "roll." clause (risky moves) and bold the word **roll** so it
+ *  stands out — those are the moves that add dice to the pool. */
 const trimTrigger = t => t
-	.replace(/,\s*roll\.?$/i, '')
+	.replace(/\broll\b(\s*[.!:]?)$/i, '**roll**$1')
 	.replace(/[,\s]+(?:and\s+)?(?:you|they|we)?\s*(?:pick|choose|select)\s+\d+\s*:?$/i, '')
 	.replace(/[:;]\s*$/, '')
-	.replace(/\.$/, '')
 	.replace(/[\s—–-]+$/, '')
 	.trim();
+
+const normCmp = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/** Append an ellipsis when the preview is not the whole rule. */
+const withEllipsis = (s, truncated) => truncated
+	? s.replace(/[.!:;,]+$/, '') + '…'
+	: s;
 
 /**
  * Extract the opening trigger/body paragraph from a vault move file.
@@ -103,9 +111,15 @@ function extractTrigger(raw) {
 		if (/^→|^see `/i.test(rawLine)) return { text: rawLine, full: rawLine, kind: 'pointer' };
 
 		const isWhen = /^(when|whenever|while|after|before|each time|if|once per|any time)\b/i.test(rawLine);
-		return { text: trimTrigger(firstSentence(rawLine)), full: rawLine, kind: isWhen ? 'when' : 'passive' };
+		const fullBody = paras.map(p => {
+			if (/^#/.test(p) || /^\*\s*\(Requires/.test(p) || /^---/.test(p)) return '';
+			const l = p.split('\n')[0].trim();
+			if (!l) return '';
+			return /^\*(?!\*)/.test(l) ? stripInline(l.replace(/^\*+/, '').replace(/\*+$/, '')) : stripInline(l);
+		}).filter(Boolean).join(' ');
+		return { text: trimTrigger(firstSentence(rawLine)), full: rawLine, kind: isWhen ? 'when' : 'passive', fullBody };
 	}
-	return { text: null, full: null, kind: 'none' };
+	return { text: null, full: null, kind: 'none', fullBody: '' };
 }
 
 function readVaultDir(dir) {
@@ -139,16 +153,20 @@ function main() {
 		const ov = OVERRIDE_BY_NORM[normalize(name)];
 		if (ov) { if (v) used.add(v.file); triggers[normalize(name)] = ov; flags.push({ where, name, kind: 'override', text: ov }); return; }
 		used.add(v.file);
-		const { text, full, kind } = extractTrigger(v.raw);
+		const { text, full, kind, fullBody } = extractTrigger(v.raw);
 		if (!text) { flags.push({ where, name, kind: 'no-text' }); return; }
 		if (kind === 'pointer') { triggers[normalize(name)] = text; flags.push({ where, name, kind: 'pointer', text }); return; }
 		if (kind === 'passive') {
 			// Short passive moves (1–2 sentences) read fine inline, like a trigger.
-			if (countSentences(full) <= 2) { triggers[normalize(name)] = full; flags.push({ where, name, kind: 'passive-short', text: full }); }
+			if (countSentences(full) <= 2) {
+				const prev = withEllipsis(full, normCmp(fullBody) !== normCmp(full));
+				triggers[normalize(name)] = prev;
+				flags.push({ where, name, kind: 'passive-short', text: prev });
+			}
 			else { flags.push({ where, name, kind: 'passive-long', text: full }); }
 			return;
 		}
-		triggers[normalize(name)] = text;
+		triggers[normalize(name)] = withEllipsis(text, normCmp(fullBody) !== normCmp(text));
 	};
 
 	for (const c of categoryNames) {
@@ -187,7 +205,9 @@ function main() {
 //
 // Each entry is a move's opening "when…" trigger, keyed by normalized name
 // (lowercase, "&"→"and", non-alphanumerics→spaces). Short passive moves
-// (1–2 sentences, no "when") are included with their full text.
+// (1–2 sentences, no "when") are included with their full text. A trailing
+// **roll** is bolded (the risky moves that add to the dice pool), and a
+// trailing ellipsis marks a preview that isn't the whole rule.
 
 const TRIGGERS = {
 ${entries}
