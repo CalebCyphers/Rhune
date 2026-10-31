@@ -52,7 +52,14 @@ function firstSentence(text) {
 	return text.trim();
 }
 
-const countSentences = t => (String(t).match(/[^.!?]+[.!?]+/g) || [t]).length;
+// Count sentences, ignoring punctuation inside quoted spans — a quoted question
+// like *"What spirits are active here?"* is not a sentence boundary.
+const countSentences = t => {
+	const s = String(t)
+		.replace(/"[^"]*"/g, ' ')
+		.replace(/\u201c[^\u201c\u201d]*\u201d/g, ' ');
+	return (s.match(/[^.!?]+[.!?]+/g) || [s]).length;
+};
 
 const stripInline = t => t
 	.replace(/\s+/g, ' ')
