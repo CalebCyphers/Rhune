@@ -98,6 +98,8 @@ const { doCharAction } = require('./lib/char_ops');
 const { isGuildOwner } = require('./lib/gm');
 const { moves } = require('./lib/moves_data');
 const { buildMoveReferenceRoot, buildMoveCategoryView } = require('./lib/move_views');
+const editOps = require('./lib/edit_ops');
+const editViews = require('./lib/edit_views');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
@@ -106,72 +108,27 @@ const rollCommand = require('./commands/roll');
 
 /**
  * Build the Edit view embed and components for a character.
+ * (Builders moved to lib/edit_views.js; this wrapper keeps the old call sites.)
  */
 function buildEditView(record) {
+	return editViews.buildEditView(record);
+}
 
-	const debils = Array.isArray(record.debilities)
-		? record.debilities.filter(Boolean)
-		: [];
-
-	const allDebilities = ['Weakened', 'Dazed', 'Miserable'];
-	const debilDesc = allDebilities.map(d => `${debils.includes(d) ? '☑' : '☐'} ${d}`).join('\n');
-
-	const editEmbed = new EmbedBuilder()
-		.setTitle(`Editing: ${record.name}`)
-		.setDescription([
-			`**HP:** \`${record.hp ?? '?'}/${record.hp_max ?? '?'}\``,
-			`**XP:** \`${record.xp ?? 0}\``,
-			`**Debilities:**\n${debilDesc}`,
-		].join('\n'))
-		.setTimestamp(new Date());
-
-	const hpRow = new ActionRowBuilder()
-		.addComponents(
-			new ButtonBuilder()
-				.setCustomId(`rhune:edithp:${record.id}:-`)
-				.setLabel('HP −1')
-				.setStyle(ButtonStyle.Danger),
-			new ButtonBuilder()
-				.setCustomId(`rhune:edithp:${record.id}:+`)
-				.setLabel('HP +1')
-				.setStyle(ButtonStyle.Success),
-		);
-
-	const xpRow = new ActionRowBuilder()
-		.addComponents(
-			new ButtonBuilder()
-				.setCustomId(`rhune:editxp:${record.id}:-`)
-				.setLabel('XP −1')
-				.setStyle(ButtonStyle.Secondary),
-			new ButtonBuilder()
-				.setCustomId(`rhune:editxp:${record.id}:+`)
-				.setLabel('XP +1')
-				.setStyle(ButtonStyle.Secondary),
-		);
-
-	const debilRow = new ActionRowBuilder();
-	for (const d of allDebilities) {
-		const isActive = debils.includes(d);
-		debilRow.addComponents(
-			new ButtonBuilder()
-				.setCustomId(`rhune:editdebil:${record.id}:${d}`)
-				.setLabel(`${isActive ? '☑' : '☐'} ${d}`)
-				.setStyle(isActive ? ButtonStyle.Danger : ButtonStyle.Secondary),
-		);
+/**
+ * Fetch a character for an edit interaction and enforce ownership.
+ * Replies with the error and returns null when the edit should not proceed.
+ */
+async function loadOwnedCharacter(interaction, charId) {
+	const record = await getCharacterById({ id: charId, guildId: interaction.guildId });
+	if (!record) {
+		await replyEphemeral(interaction, 'That character is not from this server.');
+		return null;
 	}
-
-	const doneRow = new ActionRowBuilder()
-		.addComponents(
-			new ButtonBuilder()
-				.setCustomId(`rhune:editdone:${record.id}`)
-				.setLabel('Done')
-				.setStyle(ButtonStyle.Primary),
-		);
-
-	return {
-		editEmbed,
-		editComponents: [hpRow, xpRow, debilRow, doneRow],
-	};
+	if (record.owner_user_id !== interaction.user.id) {
+		await replyEphemeral(interaction, 'You do not own that character.');
+		return null;
+	}
+	return record;
 }
 
 const client = new Client({
@@ -280,6 +237,33 @@ client.on(Events.InteractionCreate, async interaction => {
 
 			const { embeds, components } = buildNotesView(record, text);
 			await interaction.editReply({ embeds, components });
+		}
+		catch (err) {
+			handleError(interaction, err);
+		}
+		return;
+	}
+
+	// === Custom-trait edit modal: rhune:edittraitmodal:<charId> ===
+	if (interaction.isModalSubmit() && interaction.customId.startsWith('rhune:edittraitmodal:')) {
+		try {
+			await deferEphemeralReply(interaction);
+			const charId = interaction.customId.slice('rhune:edittraitmodal:'.length);
+			const record = await loadOwnedCharacter(interaction, charId);
+			if (!record) return;
+
+			const name = interaction.fields.getTextInputValue(editViews.CUSTOM_TRAIT_MODAL_NAME_ID);
+			const text = interaction.fields.getTextInputValue(editViews.CUSTOM_TRAIT_MODAL_TEXT_ID);
+			const result = editOps.addCustomTrait(record, name, text);
+			if (result.error) {
+				await interaction.editReply({ content: result.error });
+				return;
+			}
+
+			await updateCharacter({ id: charId, patch: result.patch });
+			const updated = await getCharacterById({ id: charId });
+			const view = editViews.buildTraitsEditView(updated, 0);
+			await interaction.editReply({ ...view, content: result.message });
 		}
 		catch (err) {
 			handleError(interaction, err);
@@ -614,6 +598,129 @@ client.on(Events.InteractionCreate, async interaction => {
 			return;
 		}
 
+		// Edit max HP: rhune:editmaxhp:<charId>:+
+		if (interaction.customId.startsWith('rhune:editmaxhp:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const delta = parts[3] === '+' ? 1 : -1;
+
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+
+				const result = editOps.adjustMaxHp(record, delta);
+				if (result.error) {
+					await interaction.followUp({ content: result.error, ephemeral: true });
+					return;
+				}
+
+				await updateCharacter({ id: charId, patch: result.patch });
+				const updated = await getCharacterById({ id: charId });
+				const { editEmbed, editComponents } = buildEditView(updated);
+				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Traits sub-view: rhune:edittraits:<charId>
+		if (interaction.customId.startsWith('rhune:edittraits:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const charId = interaction.customId.slice('rhune:edittraits:'.length);
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+				await interaction.editReply(editViews.buildTraitsEditView(record, 0));
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Moves sub-view: rhune:editmoves:<charId>
+		if (interaction.customId.startsWith('rhune:editmoves:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const charId = interaction.customId.slice('rhune:editmoves:'.length);
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+				await interaction.editReply(editViews.buildMovesEditView(record, 0));
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Back to main edit view: rhune:editback:<charId>
+		if (interaction.customId.startsWith('rhune:editback:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const charId = interaction.customId.slice('rhune:editback:'.length);
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+				const { editEmbed, editComponents } = buildEditView(record);
+				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Trait add paging: rhune:edittraitpage:<charId>:<page>
+		if (interaction.customId.startsWith('rhune:edittraitpage:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const page = parseInt(parts[3], 10) || 0;
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+				await interaction.editReply(editViews.buildTraitsEditView(record, page));
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Move add paging: rhune:editmovepage:<charId>:<page>
+		if (interaction.customId.startsWith('rhune:editmovepage:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const parts = interaction.customId.split(':');
+				const charId = parts[2];
+				const page = parseInt(parts[3], 10) || 0;
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+				await interaction.editReply(editViews.buildMovesEditView(record, page));
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Custom trait modal: rhune:edittraitcustom:<charId>
+		// NOTE: a modal must be the FIRST response, so we cannot defer here.
+		if (interaction.customId.startsWith('rhune:edittraitcustom:')) {
+			try {
+				const charId = interaction.customId.slice('rhune:edittraitcustom:'.length);
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+				await interaction.showModal(editViews.buildCustomTraitModal(record.id));
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
 		// Edit done: rhune:editdone:<charId>
 		if (interaction.customId.startsWith('rhune:editdone:')) {
 			try {
@@ -822,6 +929,45 @@ client.on(Events.InteractionCreate, async interaction => {
 
 
 	// (Move detail view retired — move names now link straight to the rules site.)
+
+	// === Edit view select menus ===
+	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:edit')) {
+		try {
+			await deferComponentUpdate(interaction);
+			const parts = interaction.customId.split(':');
+			const kind = parts[1];
+			const charId = parts[2];
+			const page = parts[3] !== undefined ? (parseInt(parts[3], 10) || 0) : 0;
+
+			const record = await loadOwnedCharacter(interaction, charId);
+			if (!record) return;
+
+			const value = interaction.values[0];
+			let result;
+			if (kind === 'edittraitadd') result = editOps.addTrait(record, value);
+			else if (kind === 'edittraitdel') result = editOps.removeTrait(record, value);
+			else if (kind === 'editmoveadd') result = editOps.addMove(record, value);
+			else if (kind === 'editmovedel') result = editOps.removeMove(record, value);
+			else return;
+
+			if (result.error) {
+				await interaction.followUp({ content: result.error, ephemeral: true });
+			}
+			else {
+				await updateCharacter({ id: charId, patch: result.patch });
+			}
+
+			const updated = await getCharacterById({ id: charId });
+			const view = (kind === 'edittraitadd' || kind === 'edittraitdel')
+				? editViews.buildTraitsEditView(updated, page)
+				: editViews.buildMovesEditView(updated, page);
+			await interaction.editReply(view);
+		}
+		catch (err) {
+			handleError(interaction, err);
+		}
+		return;
+	}
 
 	// === Creation wizard select menus ===
 	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:create:')) {
