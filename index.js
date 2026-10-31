@@ -74,19 +74,16 @@ const { upsertInventoryState, getInventoryState } = require('./lib/inventory_sta
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { buildSheetButtons } = require('./lib/sheet_buttons');
-const siteLinks = require('./lib/site_links');
-const { triggerFor } = require('./lib/move_triggers');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, setTraitPage, setTraitSlot, clearTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents, handleError } = require('./lib/interaction_helpers');
-const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
+const { lookupPlaybook, renderCharacterMoves } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
 const { doCharAction } = require('./lib/char_ops');
 const { isGuildOwner } = require('./lib/gm');
-const { moves, categoryNames, getCategoryLabel } = require('./lib/moves_data');
+const { moves } = require('./lib/moves_data');
 const { buildMoveReferenceRoot, buildMoveCategoryView } = require('./lib/move_views');
-const { splitIntoChunks, tagPagination } = require('./lib/embed_pager');
 
 const { pbDiagnostics } = require('./lib/pb_diagnostics');
 
@@ -370,67 +367,27 @@ client.on(Events.InteractionCreate, async interaction => {
 			return;
 		}
 
-		// Playbook button: rhune:playbook:<charId>
-		if (interaction.customId.startsWith('rhune:playbook:')) {
-			try {
-				// Handle back-to-sheet from playbook view
-				if (interaction.customId.startsWith('rhune:playbook:back:')) {
-					const charId = interaction.customId.slice('rhune:playbook:back:'.length);
-					const record = await getCharacterById({ id: charId });
-					const embed = await renderCharacterSheetEmbed(record);
+		// (Playbook view retired — damage/background/instinct/moves now render on
+		// the character sheet itself, each linked to its full text.)
 
-					const row = buildSheetButtons(record);
-
-					await interaction.update({ embeds: [embed], components: [row], flags: 64 });
-					return;
-				}
-
-				const charId = interaction.customId.slice('rhune:playbook:'.length);
-				const record = await getCharacterById({ id: charId });
-
-				const embeds = renderPlaybookEmbed(record, 'overview');
-				if (!embeds) {
-					await replyEphemeral(interaction, 'No playbook info found for this character.');
-					return;
-				}
-
-				const navRow = buildPlaybookNav(record);
-				const backRow = new ActionRowBuilder()
-					.addComponents(
-						new ButtonBuilder()
-							.setCustomId(`rhune:playbook:back:${charId}`)
-							.setLabel('‹ Back')
-							.setStyle(ButtonStyle.Secondary),
-					);
-
-				await interaction.reply({ embeds, components: [navRow, backRow], ephemeral: true });
-			}
-			catch (err) {
-				handleError(interaction, err);
-			}
-			return;
-		}
-
-		// === Move reference from sheet button ===
+		// === Moves from sheet button ===
 		if (interaction.customId.startsWith('rhune:move:sheet:')) {
 			try {
 				const charId = interaction.customId.slice('rhune:move:sheet:'.length);
 				const record = await getCharacterById({ id: charId });
 
-				// Show character's personal playbook moves if they have a playbook
+				const browseRow = new ActionRowBuilder().addComponents(
+					new ButtonBuilder()
+						.setCustomId('rhune:move:reference')
+						.setLabel('📖 Browse All Moves')
+						.setStyle(ButtonStyle.Secondary),
+				);
+
+				// Character's own playbook moves, each linked to the rules site.
 				if (record.playbook && lookupPlaybook(record.playbook)) {
-					const embeds = renderPlaybookEmbed(record, 'moves');
+					const embeds = renderCharacterMoves(record);
 					if (embeds) {
-						const navRow = buildPlaybookNav(record);
-
-						const browseRow = new ActionRowBuilder().addComponents(
-							new ButtonBuilder()
-								.setCustomId('rhune:move:reference')
-								.setLabel('📖 Browse All Moves')
-								.setStyle(ButtonStyle.Secondary),
-						);
-
-						await interaction.reply({ embeds, components: [navRow, browseRow], ephemeral: true });
+						await interaction.reply({ embeds, components: [browseRow], ephemeral: true });
 						return;
 					}
 				}
@@ -843,37 +800,7 @@ client.on(Events.InteractionCreate, async interaction => {
 		return;
 	}
 
-	// === Playbook section select menus ===
-	if (interaction.isStringSelectMenu() && interaction.customId.startsWith('rhune:playbook:section:')) {
-		const charId = interaction.customId.slice('rhune:playbook:section:'.length);
-		const section = interaction.values[0];
-
-		try {
-			const record = await getCharacterById({ id: charId });
-
-
-			const embeds = renderPlaybookEmbed(record, section);
-			if (!embeds) {
-				await replyEphemeral(interaction, 'No playbook info found for this character.');
-				return;
-			}
-
-			const navRow = buildPlaybookNav(record);
-			const backRow = new ActionRowBuilder()
-				.addComponents(
-					new ButtonBuilder()
-						.setCustomId(`rhune:playbook:back:${charId}`)
-						.setLabel('‹ Back')
-						.setStyle(ButtonStyle.Secondary),
-				);
-
-			await interaction.update({ embeds, components: [navRow, backRow], flags: 64 });
-		}
-		catch (err) {
-			handleError(interaction, err);
-		}
-		return;
-	}
+	// (Playbook section select retired — the playbook view no longer exists.)
 
 
 	// (Move detail view retired — move names now link straight to the rules site.)
