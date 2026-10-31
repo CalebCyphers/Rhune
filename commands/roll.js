@@ -4,7 +4,7 @@ const { rollPool, poolFromRolls, rollExpr, rollCommunity } = require('../lib/dic
 const { exprResultEmbed, poolEmbed, communityEmbed, withRollId } = require('../lib/format');
 const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
-const { renderD6Strip } = require('../lib/pool_strip');
+const { renderD6Strip, renderDiceStrip } = require('../lib/pool_strip');
 
 // ─── Attachments ─────────────────────────────────────────────
 
@@ -31,23 +31,38 @@ async function buildDiceAttachments(result, embed) {
 		return files;
 	}
 
-	if (
-		result?.type === 'expr'
-		&& result.count === 1
-		&& (result.sides === 6 || result.sides === 20)
-	) {
-		try {
-			const face = result.rolls?.[0];
-			const filePath = diceImagePath({ sides: result.sides, face });
-			const fileName = diceImageName({ sides: result.sides, face });
-			if (filePath && fileName) {
-				files.push(new AttachmentBuilder(filePath, { name: fileName }));
-				embed.setThumbnail(`attachment://${fileName}`);
+	if (result?.type === 'expr') {
+		// Single die: show the face itself as a thumbnail.
+		if (result.count === 1) {
+			try {
+				const face = result.rolls?.[0];
+				const filePath = diceImagePath({ sides: result.sides, face });
+				const fileName = diceImageName({ sides: result.sides, face });
+				if (filePath && fileName) {
+					files.push(new AttachmentBuilder(filePath, { name: fileName }));
+					embed.setThumbnail(`attachment://${fileName}`);
+				}
 			}
+			catch {
+				// image not available — skip
+			}
+			return files;
+		}
+
+		// Multiple dice: render a strip of that die type.
+		try {
+			const buf = await renderDiceStrip({
+				sides: result.sides,
+				rolls: result.rolls,
+				droppedIndex: result.droppedIndex ?? null,
+			});
+			files.push(new AttachmentBuilder(buf, { name: 'roll.png' }));
+			embed.setImage('attachment://roll.png');
 		}
 		catch {
-			// image not available — skip
+			// image rendering failure — skip
 		}
+		return files;
 	}
 
 	return files;
