@@ -495,6 +495,21 @@ module.exports = {
 
 const PLAYBOOK_ORDER = ['Blessed', 'Fox', 'Heavy', 'Judge', 'Lightbearer', 'Marshal', 'Ranger', 'Seeker', 'WouldbeHero'];
 
+/** Collapse whitespace and truncate to n chars, adding an ellipsis if cut. */
+function truncate(text, n) {
+	const t = String(text || '').replace(/\s+/g, ' ').trim();
+	return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
+}
+
+/** First n sentences of a block, with an ellipsis if there's more (or it's long). */
+function firstSentences(text, n, cap = 220) {
+	const t = String(text || '').replace(/\s+/g, ' ').trim();
+	const parts = t.match(/[^.!?]+[.!?]+/g) || [t];
+	let out = parts.slice(0, n).join(' ').trim();
+	if (parts.length > n || out.length > cap) out = `${out.slice(0, cap).trimEnd()}…`;
+	return out;
+}
+
 function buildWizardStep(interaction, step) {
 	if (!step) {
 		return {
@@ -514,14 +529,11 @@ function buildWizardStep(interaction, step) {
 			const die = pb.creationRules?.die || 'd6';
 			const hp = pb.creationRules?.maxHP || '?';
 			const url = siteLinks.playbookUrl(key);
-			const link = url ? `[Read the ${pb.name} →](${url})` : '';
+			const flavor = truncate(pb.tagline, 60);
 			embed.addFields({
 				name: pb.name,
-				value: `*${pb.tagline}*
-` +
-					`\`Damage ${die}  ·  Max HP ${hp}\`` +
-					(link ? `
-${link}` : ''),
+				value: `\`Damage ${die}  ·  Max HP ${hp}\`\n*${flavor}*` +
+					(url ? ` [Read more ↗](${url})` : ''),
 			});
 		});
 
@@ -546,12 +558,13 @@ ${link}` : ''),
 			.setDescription('Each background shapes your character\'s past and grants different moves. Read about your options below, then choose one.');
 
 		step.backgrounds.forEach(bg => {
-			const grantLine = bg.grants.length > 0 ? `*(Grants: ${bg.grants.join(', ')})*` : '';
+			const summary = firstSentences(bg.text, 2);
+			const grantLine = bg.grants.length > 0 ? `**Grants:** ${bg.grants.join(', ')}` : '';
 			const url = siteLinks.backgroundUrl(step.playbookKey, bg.name);
-			const link = url ? `[Read the full background →](${url})` : '';
+			const link = url ? `[Read more ↗](${url})` : '';
 			embed.addFields({
 				name: bg.name.substring(0, 256),
-				value: ([grantLine, link].filter(Boolean).join('\n') || '—').substring(0, 1024),
+				value: ([summary, grantLine, link].filter(Boolean).join('\n') || '—').substring(0, 1024),
 			});
 		});
 
@@ -585,18 +598,13 @@ ${link}` : ''),
 			.setTitle('Choose Your Instinct')
 			.setDescription('Your instinct is what drives you. It colors how you approach every situation. Read the options below, then pick one.');
 
-		step.instincts.forEach(inst => {
-			embed.addFields({
-				name: inst.name.substring(0, 256),
-				value: inst.desc.substring(0, 1024),
-			});
-		});
-
-		// Deep link to the playbook's Instinct section on the rules site.
-		{
-			const url = siteLinks.instinctUrl(step.playbookKey);
-			if (url) embed.setDescription(`${embed.data.description}\n\n[Read the full Instincts list →](${url})`);
-		}
+		// Bulleted list reads better than a wall of headers.
+		const instLines = step.instincts.map(i => `• **${i.name}** — ${i.desc}`);
+		const instUrl = siteLinks.instinctUrl(step.playbookKey);
+		embed.setDescription(
+			(`Your instinct is what drives you. It colors how you approach every situation. Pick one below.\n\n${instLines.join('\n')}`).slice(0, 4000) +
+			(instUrl ? `\n\n[Read the full Instincts list →](${instUrl})` : ''),
+		);
 
 		const row = new ActionRowBuilder();
 		step.instincts.forEach(inst => {
@@ -625,18 +633,18 @@ ${link}` : ''),
 
 	case 'traits_picker': {
 		const all = step.allTraits || [];
-		const chosen = step.chosen || [];
+		const slots = step.slots || [null, null];
 		const remaining = step.remaining;
 		const pickCount = step.pickCount || 2;
 		const page = step.page || 0;
 		const pageSize = step.pageSize || 24;
 		const pageCount = step.pageCount || 1;
 
-		const slot = (i) => {
-			const n = chosen[i];
-			if (!n) return `Slot ${i + 1}: _empty_`;
+		const slotLine = (i) => {
+			const n = slots[i];
+			if (!n) return `Trait ${i + 1}: _empty_`;
 			const t = all.find(x => x.name === n);
-			return `Slot ${i + 1}: **${n}**${t ? ` — ${t.text}` : ''}`;
+			return `Trait ${i + 1}: **${n}**${t ? ` — ${t.text}` : ''}`;
 		};
 
 		const pageTraits = all.slice(page * pageSize, page * pageSize + pageSize);
@@ -646,7 +654,7 @@ ${link}` : ''),
 			`[See the full trait list on the rules site →](${siteLinks.TRAIT_LIST_URL})
 
 ` +
-			`${slot(0)}\n${slot(1)}\n\n` +
+			`${slotLine(0)}\n${slotLine(1)}\n\n` +
 			`**Traits ${page * pageSize + 1}–${Math.min(all.length, (page + 1) * pageSize)} of ${all.length}**` +
 			(pageCount > 1 ? ` *(page ${page + 1}/${pageCount})*` : '');
 
@@ -656,22 +664,26 @@ ${link}` : ''),
 
 		const rows = [];
 
-		// One paged dropdown — choosing fills the first open slot.
-		const traitMenu = new StringSelectMenuBuilder()
-			.setCustomId('rhune:create:picktrait')
-			.setPlaceholder('Add a trait…')
-			.setMinValues(1)
-			.setMaxValues(1);
-		traitMenu.addOptions(pageTraits.map(t => {
-			const isChosen = chosen.includes(t.name);
-			const opt = new StringSelectMenuOptionBuilder()
-				.setLabel(isChosen ? `✓ ${t.name}` : t.name)
-				.setValue(t.name);
-			if (t.text) opt.setDescription(t.text.substring(0, 100));
-			if (isChosen) opt.setDefault(true);
-			return opt;
-		}));
-		rows.push(new ActionRowBuilder().addComponents(traitMenu));
+		// Two independent slot dropdowns. Each shows the current page; picking an
+		// option fills that slot. NOTE: no setDefault() — a select with more
+		// defaults than max_values makes Discord reject the whole message.
+		for (let slot = 0; slot < 2; slot++) {
+			const menu = new StringSelectMenuBuilder()
+				.setCustomId(`rhune:create:picktrait:${slot}`)
+				.setPlaceholder(`Trait ${slot + 1}${slots[slot] ? ` — ${slots[slot]}` : ''}`)
+				.setMinValues(1)
+				.setMaxValues(1);
+			menu.addOptions(pageTraits.map(t => {
+				const inThisSlot = slots[slot] === t.name;
+				const inOtherSlot = slots[1 - slot] === t.name;
+				const opt = new StringSelectMenuOptionBuilder()
+					.setLabel(inThisSlot ? `✓ ${t.name}` : t.name)
+					.setValue(t.name);
+				if (t.text) opt.setDescription(((inOtherSlot ? '(other slot) ' : '') + t.text).substring(0, 100));
+				return opt;
+			}));
+			rows.push(new ActionRowBuilder().addComponents(menu));
+		}
 
 		// Paging row (only when there's more than one page).
 		if (pageCount > 1) {
@@ -690,13 +702,14 @@ ${link}` : ''),
 		}
 
 		// Slot-clear row (only if something is picked).
-		if (chosen.length) {
+		if (slots.some(Boolean)) {
 			const clearRow = new ActionRowBuilder();
-			chosen.forEach((n, i) => {
+			slots.forEach((n, i) => {
+				if (!n) return;
 				clearRow.addComponents(
 					new ButtonBuilder()
 						.setCustomId(`rhune:create:cleartrait:${i}`)
-						.setLabel(`Clear slot ${i + 1}`)
+						.setLabel(`Clear trait ${i + 1}`)
 						.setStyle(ButtonStyle.Danger),
 				);
 			});

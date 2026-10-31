@@ -1,16 +1,10 @@
 const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
-const { rollPool, poolFromRolls, rollExpr, rollCommunity, POOL_MAX } = require('../lib/dice');
+const { rollPool, poolFromRolls, rollExpr, rollCommunity } = require('../lib/dice');
 const { exprResultEmbed, poolEmbed, communityEmbed, withRollId } = require('../lib/format');
 const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
 const { renderD6Strip } = require('../lib/pool_strip');
-
-const MODE_CHOICES = [
-	{ name: 'normal', value: 'normal' },
-	{ name: 'advantage', value: 'adv' },
-	{ name: 'disadvantage', value: 'dis' },
-];
 
 // ─── Attachments ─────────────────────────────────────────────
 
@@ -101,50 +95,189 @@ function rerollButtons(result) {
 	return [row];
 }
 
-// ─── Quick menu ──────────────────────────────────────────────
+// ─── Roll builder ────────────────────────────────────────────
+//
+// /roll opens a builder: pick a die type, a count, and (optionally) advantage
+// or disadvantage, then hit Roll. Results post to the channel; a pool that
+// comes up with 1s offers a one-tap "reroll the 1s".
 
-function buildQuickMenu(mode = 'normal') {
-	const modeLabel = mode === 'adv' ? ' — Advantage' : mode === 'dis' ? ' — Disadvantage' : '';
+const BUILDER_DICE = [4, 6, 8, 10, 12, 20, 100];
+const BUILDER_MAX = 20;
+
+/** Encode builder state into a customId-safe token. */
+function encodeBuilder({ sides, count, mode }) {
+	return `${sides}-${count}-${mode}`;
+}
+
+/** Decode a builder token (defensive — falls back to 1d6 normal). */
+function decodeBuilder(s) {
+	const parts = String(s || '').split('-');
+	const sides = Number.parseInt(parts[0], 10);
+	const count = Number.parseInt(parts[1], 10);
+	const mode = parts[2];
+	return {
+		sides: BUILDER_DICE.includes(sides) ? sides : 6,
+		count: Number.isInteger(count) && count >= 1 ? Math.min(count, BUILDER_MAX) : 1,
+		mode: ['normal', 'adv', 'dis', 'community'].includes(mode) ? mode : 'normal',
+	};
+}
+
+/** Build the interactive roll builder for a given state. */
+function buildRollBuilder(state = { sides: 6, count: 1, mode: 'normal' }) {
+	const { sides, count } = state;
+	const mode = state.mode || 'normal';
+	const isCommunity = mode === 'community';
+	const modeLabel = mode === 'adv' ? ' · **advantage**' : mode === 'dis' ? ' · **disadvantage**' : isCommunity ? ' · **community** (take highest)' : '';
+	const preview = isCommunity ? `Community · **${count}d6, take the highest**` : `**${count}d${sides}**${modeLabel}`;
+
 	const embed = new EmbedBuilder()
 		.setColor(0x6b3fa0)
-		.setTitle(`🎲 Push Your Luck${modeLabel}`)
-		.setDescription('Pick your pool size — your pool starts at **1** and grows by 1 for each risky move this turn.');
+		.setTitle('🎲 Roll')
+		.setDescription(`Pick your dice, then hit **Roll**.\n\n${preview}`);
 
-	const row1 = new ActionRowBuilder();
-	for (let n = 1; n <= 5; n++) {
-		row1.addComponents(
+	// Die-type buttons (first row).
+	const dieRow1 = new ActionRowBuilder();
+	for (const d of BUILDER_DICE.slice(0, 5)) {
+		dieRow1.addComponents(
 			new ButtonBuilder()
-				.setCustomId(`rhune:qr:pool:${n}:${mode}`)
-				.setLabel(`${n}d6`)
-				.setStyle(ButtonStyle.Primary),
+				.setCustomId(`rhune:rb:die:${encodeBuilder({ sides: d, count, mode })}`)
+				.setLabel(`d${d}`)
+				.setStyle(d === sides ? ButtonStyle.Primary : ButtonStyle.Secondary),
 		);
 	}
-	const row2 = new ActionRowBuilder();
-	row2.addComponents(
+
+	// Second row: remaining die types + count controls.
+	const dieRow2 = new ActionRowBuilder();
+	for (const d of BUILDER_DICE.slice(5)) {
+		dieRow2.addComponents(
+			new ButtonBuilder()
+				.setCustomId(`rhune:rb:die:${encodeBuilder({ sides: d, count, mode })}`)
+				.setLabel(`d${d}`)
+				.setStyle(d === sides ? ButtonStyle.Primary : ButtonStyle.Secondary),
+		);
+	}
+	dieRow2.addComponents(
 		new ButtonBuilder()
-			.setCustomId(`rhune:qr:pool:6:${mode}`)
-			.setLabel('6d6')
-			.setStyle(ButtonStyle.Primary),
+			.setCustomId(`rhune:rb:count:${encodeBuilder({ sides, count: Math.max(1, count - 1), mode })}`)
+			.setLabel('−')
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(count <= 1),
 		new ButtonBuilder()
-			.setCustomId('rhune:qr:menu:adv')
+			.setCustomId('rhune:rb:noop')
+			.setLabel(`${count}d${sides}`)
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(true),
+		new ButtonBuilder()
+			.setCustomId(`rhune:rb:count:${encodeBuilder({ sides, count: Math.min(BUILDER_MAX, count + 1), mode })}`)
+			.setLabel('+')
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(count >= BUILDER_MAX),
+	);
+
+	const modeRow = new ActionRowBuilder().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`rhune:rb:mode:${encodeBuilder({ sides, count, mode: 'adv' })}`)
 			.setLabel('Advantage')
 			.setStyle(mode === 'adv' ? ButtonStyle.Success : ButtonStyle.Secondary),
 		new ButtonBuilder()
-			.setCustomId('rhune:qr:menu:dis')
+			.setCustomId(`rhune:rb:mode:${encodeBuilder({ sides, count, mode: 'dis' })}`)
 			.setLabel('Disadvantage')
 			.setStyle(mode === 'dis' ? ButtonStyle.Danger : ButtonStyle.Secondary),
 		new ButtonBuilder()
-			.setCustomId('rhune:qr:menu:normal')
-			.setLabel('Reset')
-			.setStyle(ButtonStyle.Secondary),
+			.setCustomId(`rhune:rb:mode:${encodeBuilder({ sides, count, mode: 'community' })}`)
+			.setLabel('Community')
+			.setStyle(isCommunity ? ButtonStyle.Primary : ButtonStyle.Secondary),
 		new ButtonBuilder()
-			.setCustomId('rhune:qr:cancel')
+			.setCustomId(`rhune:rb:mode:${encodeBuilder({ sides, count, mode: 'normal' })}`)
+			.setLabel('Reset')
+			.setStyle(ButtonStyle.Secondary)
+			.setDisabled(mode === 'normal'),
+	);
+
+	const actionRow = new ActionRowBuilder().addComponents(
+		new ButtonBuilder()
+			.setCustomId(`rhune:rb:roll:${encodeBuilder(state)}`)
+			.setLabel('🎲 Roll')
+			.setStyle(ButtonStyle.Primary),
+		new ButtonBuilder()
+			.setCustomId('rhune:rb:cancel')
 			.setLabel('Cancel')
 			.setStyle(ButtonStyle.Secondary),
 	);
 
-	return { embed, components: [row1, row2] };
+	return { embed, components: [dieRow1, dieRow2, modeRow, actionRow] };
 }
+
+/** Post a finished roll to the channel (shared by the builder's paths). */
+async function postRollResult(interaction, { result, embed, components, expr, mode }) {
+	const rollId = await logRoll({
+		guildId: interaction.guildId,
+		channelId: interaction.channelId,
+		userId: interaction.user.id,
+		commandName: 'roll',
+		expr,
+		mode,
+		result,
+	});
+
+	const payload = await buildReply(embed, result, rollId, components);
+
+	if (interaction.guildId) {
+		const channel = interaction.channel
+			?? await interaction.client.channels.fetch(interaction.channelId);
+		if (!channel?.isTextBased?.()) throw new Error('Channel is not text-based.');
+		try {
+			await channel.send(payload);
+			await interaction.update({ content: '✅ Rolled!', embeds: [], components: [], flags: 64 });
+		}
+		catch (err) {
+			console.error('Roll public post failed:', err?.message || err);
+			await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+		}
+	}
+	else {
+		await interaction.update({ content: '✅ Rolled!', embeds: payload.embeds, files: payload.files, components: payload.components, flags: 64 });
+	}
+	return result;
+}
+
+/** Roll whatever the builder is configured for, then post it. */
+async function executeBuilderRoll(interaction, state) {
+	const { sides, count, mode } = state;
+
+	// Community roll — always d6, take the highest (steading/Fortunes rolls).
+	if (mode === 'community') {
+		const result = rollCommunity({ count, mode: 'normal' });
+		return postRollResult(interaction, {
+			result,
+			embed: communityEmbed(result),
+			components: [],
+			expr: `community:${count}`,
+			mode: 'normal',
+		});
+	}
+
+	if (sides === 6) {
+		const result = rollPool({ count, mode });
+		return postRollResult(interaction, {
+			result,
+			embed: poolEmbed(result),
+			components: rerollButtons(result),
+			expr: `pool:${count}${mode !== 'normal' ? ` ${mode}` : ''}`,
+			mode: result.mode,
+		});
+	}
+
+	const result = rollExpr(`${count}d${sides}`, mode === 'normal' ? null : mode);
+	return postRollResult(interaction, {
+		result,
+		embed: exprResultEmbed(result),
+		components: [],
+		expr: `${count}d${sides}${mode !== 'normal' ? ` ${mode}` : ''}`,
+		mode: result.mode,
+	});
+}
+
 
 // ─── Command definition ──────────────────────────────────────
 
@@ -191,42 +324,15 @@ async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls 
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('roll')
-		.setDescription('Roll dice — a push-your-luck pool, a plain expression, or a community roll')
-		.addIntegerOption(option => option
-			.setName('pool')
-			.setDescription('Push your luck: roll this many d6 (your pool size)')
-			.setRequired(false)
-			.setMinValue(1)
-			.setMaxValue(POOL_MAX))
-		.addStringOption(option => option
-			.setName('expr')
-			.setDescription('A plain dice expression (e.g. d20, 2d6+1)')
-			.setRequired(false))
-		.addIntegerOption(option => option
-			.setName('community')
-			.setDescription('Community roll: roll this many d6, take the highest (0 = broken: 2d6, lowest)')
-			.setRequired(false)
-			.setMinValue(0)
-			.setMaxValue(POOL_MAX))
-		.addStringOption(option => option
-			.setName('mode')
-			.setDescription('Advantage/disadvantage (extra die, drop lowest/highest)')
-			.setRequired(false)
-			.addChoices(...MODE_CHOICES))
+		.setDescription('Open the roll builder — dice, advantage/disadvantage, then roll')
 		.addBooleanOption(option => option
 			.setName('last')
 			.setDescription('Show your most recent roll')
 			.setRequired(false)),
 	async execute(interaction) {
 		const showLast = interaction.options.getBoolean('last') || false;
-		const pool = interaction.options.getInteger('pool');
-		const community = interaction.options.getInteger('community');
-		const expr = interaction.options.getString('expr');
-		const mode = interaction.options.getString('mode') || 'normal';
-		const hasExpr = interaction.options.getString('expr') !== null;
 
-		const { guildId, channelId } = interaction;
-		const userId = interaction.user.id;
+		const { guildId, userId } = interaction;
 
 		try {
 			if (showLast) {
@@ -244,51 +350,8 @@ module.exports = {
 				return;
 			}
 
-			// Community roll.
-			if (community !== null) {
-				const result = rollCommunity({ count: community, mode });
-				const rollId = await logRoll({
-					guildId, channelId, userId,
-					commandName: 'roll',
-					expr: `community:${community}${mode !== 'normal' ? ` ${mode}` : ''}`,
-					mode,
-					result,
-				});
-				await interaction.reply(await buildReply(communityEmbed(result), result, rollId));
-				return;
-			}
-
-			// Plain expression.
-			if (hasExpr) {
-				const modeOverride = mode === 'normal' ? null : mode;
-				const result = rollExpr(expr, modeOverride);
-				const rollId = await logRoll({
-					guildId, channelId, userId,
-					commandName: 'roll',
-					expr,
-					mode: result.mode,
-					result,
-				});
-				await interaction.reply(await buildReply(exprResultEmbed(result), result, rollId));
-				return;
-			}
-
-			// Push-your-luck pool.
-			if (pool !== null) {
-				const result = rollPool({ count: pool, mode });
-				const rollId = await logRoll({
-					guildId, channelId, userId,
-					commandName: 'roll',
-					expr: `pool:${pool}${mode !== 'normal' ? ` ${mode}` : ''}`,
-					mode,
-					result,
-				});
-				await interaction.reply(await buildReply(poolEmbed(result), result, rollId, rerollButtons(result)));
-				return;
-			}
-
-			// No options → quick menu.
-			const { embed, components } = buildQuickMenu();
+			// Default: open the roll builder.
+			const { embed, components } = buildRollBuilder();
 			await interaction.reply({ embeds: [embed], components, ephemeral: true });
 		}
 		catch (err) {
@@ -308,7 +371,9 @@ module.exports = {
 		return rollPool({ count, mode });
 	},
 
-	buildQuickMenu,
+	buildRollBuilder,
+	decodeBuilder,
+	executeBuilderRoll,
 	buildReply,
 	rerollButtons,
 	decodeRolls,

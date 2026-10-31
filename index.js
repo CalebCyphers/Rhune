@@ -77,7 +77,7 @@ const { buildSheetButtons } = require('./lib/sheet_buttons');
 const siteLinks = require('./lib/site_links');
 const { triggerFor } = require('./lib/move_triggers');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
-const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, setTraitPage, toggleTrait, clearTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
+const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, setTraitPage, setTraitSlot, clearTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents, handleError } = require('./lib/interaction_helpers');
 const { lookupPlaybook, renderPlaybookEmbed, buildPlaybookNav } = require('./lib/playbooks');
@@ -300,36 +300,40 @@ client.on(Events.MessageCreate, async message => {
 
 client.on(Events.InteractionCreate, async interaction => {
 	if (interaction.isButton()) {
-		// === Quick Roll buttons: rhune:qr:* ===
-		if (interaction.customId.startsWith('rhune:qr:')) {
+		// === Roll builder buttons: rhune:rb:* ===
+		if (interaction.customId.startsWith('rhune:rb:')) {
 			try {
 				const parts = interaction.customId.split(':');
 				const action = parts[2];
 
-				// Cancel — dismiss the menu.
+				// Cancel — dismiss the builder.
 				if (action === 'cancel') {
 					await interaction.update({ content: 'Cancelled.', embeds: [], components: [], flags: 64 });
 					return;
 				}
 
-				// Switch mode — re-render the pool picker (stateless).
-				if (action === 'menu') {
-					const mode = parts[3] || 'normal';
-					const { embed, components } = rollCommand.buildQuickMenu(mode);
-					await interaction.update({ embeds: [embed], components, flags: 64 });
+				// Inert read-out button (the current NdX label).
+				if (action === 'noop') {
 					return;
 				}
 
-				// Roll a pool: rhune:qr:pool:<n>:<mode>
-				if (action === 'pool') {
-					const count = Number.parseInt(parts[3], 10);
-					const mode = parts[4] || 'normal';
-					await rollCommand.executePoolRoll(interaction, { count, mode });
+				// Roll it.
+				if (action === 'roll') {
+					const state = rollCommand.decodeBuilder(parts[3]);
+					await rollCommand.executeBuilderRoll(interaction, state);
+					return;
+				}
+
+				// Die type / count / mode — re-render the builder (stateless).
+				if (action === 'die' || action === 'count' || action === 'mode') {
+					const state = rollCommand.decodeBuilder(parts[3]);
+					const { embed, components } = rollCommand.buildRollBuilder(state);
+					await interaction.update({ embeds: [embed], components, flags: 64 });
 					return;
 				}
 			}
 			catch (err) {
-				console.error('Quick roll error:', err);
+				console.error('Roll builder error:', err);
 				try {
 					await interaction.update({ content: `Error: ${err.message}`, embeds: [], components: [], flags: 64 });
 				}
@@ -695,7 +699,7 @@ client.on(Events.InteractionCreate, async interaction => {
 					setTraitPage(wizardId, value);
 					break;
 				case 'toggletrait':
-					toggleTrait(wizardId, value);
+					setTraitSlot(wizardId, 0, value);
 					break;
 				case 'cleartrait':
 					clearTrait(wizardId, value);
@@ -897,8 +901,9 @@ client.on(Events.InteractionCreate, async interaction => {
 			if (interaction.customId === 'rhune:create:selectmove') {
 				wizard.chosenMoves = interaction.values;
 			}
-			else if (interaction.customId === 'rhune:create:picktrait') {
-				toggleTrait(wizardId, interaction.values[0]);
+			else if (interaction.customId.startsWith('rhune:create:picktrait:')) {
+				const slot = interaction.customId.split(':')[3];
+				setTraitSlot(wizardId, slot, interaction.values[0]);
 			}
 			else if (interaction.customId.startsWith('rhune:create:orchoice:')) {
 				const parts = interaction.customId.split(':');
