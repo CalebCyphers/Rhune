@@ -75,6 +75,7 @@ const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { buildSheetButtons } = require('./lib/sheet_buttons');
 const siteLinks = require('./lib/site_links');
+const { triggerFor } = require('./lib/move_triggers');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, browseSpecies, toggleTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
@@ -968,13 +969,13 @@ client.on(Events.InteractionCreate, async interaction => {
 				}
 
 				const moveUrl = siteLinks.moveUrl(moveName, null);
+				const trigger = triggerFor(moveName);
+				const lines = [];
+				if (trigger) lines.push(trigger);
+				lines.push(moveUrl ? `[Read the full move ↗](${moveUrl})` : '*Not on the site yet.*');
 				const embed = new EmbedBuilder()
 					.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
-					.setDescription(
-						moveUrl
-							? `[Read **${moveName}** on the rules site ↗](${moveUrl})`
-							: '*Not on the site yet.*',
-					);
+					.setDescription(lines.join('\n\n'));
 
 				const pickerRow = buildMovePicker(category);
 				const navRow = buildMoveNav();

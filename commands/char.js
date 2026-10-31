@@ -13,6 +13,7 @@ const {
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
 const { lookupPlaybook } = require('../lib/playbooks');
 const { buildSheetButtons } = require('../lib/sheet_buttons');
+const { triggerFor } = require('../lib/move_triggers');
 const siteLinks = require('../lib/site_links');
 const { startWizard, getStepInfo, selectPlaybook } = require('../lib/create_wizard');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
@@ -696,10 +697,11 @@ ${link}` : ''),
 	}
 
 	case 'moves_picker': {
-		// Show auto-granted moves (names only; details live on the rules site).
+		// Show auto-granted moves with their "when" trigger (mechanics live on the site).
 		let grantList = '';
 		step.autoGranted.forEach(m => {
-			grantList += `• **${m}**\n`;
+			const t = triggerFor(m);
+			grantList += t ? `• **${m}** — ${t}\n` : `• **${m}**\n`;
 		});
 
 		let orStatus = '';
@@ -709,9 +711,10 @@ ${link}` : ''),
 				const pkg = chosen ? group.options.find(o => o.name === chosen) : null;
 				orStatus += `\n\n**${group.label}:**`;
 				if (chosen && pkg) {
-					// Show each granted move (names only).
+					// Show each granted move with its trigger.
 					pkg.grants.forEach(m => {
-						orStatus += `\n  ✓ **${m}**`;
+						const t = triggerFor(m);
+						orStatus += t ? `\n  ✓ **${m}** — ${t}` : `\n  ✓ **${m}**`;
 					});
 				}
 				else {
@@ -727,7 +730,8 @@ ${link}` : ''),
 		let chosenMovesList = '';
 		if (step.currentPicks > 0) {
 			step.chosenMoves.forEach(m => {
-				chosenMovesList += `\n  ✓ **${m}**`;
+				const t = triggerFor(m);
+				chosenMovesList += t ? `\n  ✓ **${m}** — ${t}` : `\n  ✓ **${m}**`;
 			});
 		}
 		let remainingText = chosenMovesList ? `**Selected moves:**${chosenMovesList}` : '';
@@ -797,9 +801,11 @@ ${link}` : ''),
 
 			availableSlice.forEach(m => {
 				const isChosen = step.chosenMoves.includes(m.name);
+				const t = triggerFor(m.name);
 				const opt = new StringSelectMenuOptionBuilder()
 					.setLabel(isChosen ? `✓ ${m.name}` : m.name)
 					.setValue(m.name);
+				if (t) opt.setDescription(t.substring(0, 100));
 				if (isChosen) {
 					opt.setDefault(true);
 				}
@@ -896,7 +902,9 @@ ${link}` : ''),
 		let allMovesList = '';
 		step.allMoves.forEach(m => {
 			const url = siteLinks.moveUrl(m, step.playbookKey);
-			allMovesList += url ? `• **[${m}](${url})**\n` : `• **${m}** — *not on the site yet*\n`;
+			const t = triggerFor(m);
+			const head = url ? `**[${m}](${url})**` : `**${m}**`;
+			allMovesList += `• ${head}${t ? ` — ${t}` : ''}\n`;
 		});
 
 		const traitsLine = (step.traits || []).length
