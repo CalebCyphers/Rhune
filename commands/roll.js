@@ -72,25 +72,16 @@ function decodeRolls(s) {
 }
 
 /**
- * Reroll buttons for a pool roll. Only shown for normal-mode pools, since the
- * bust reroll is about the dice showing 1.
+ * Reroll button for a pool roll: the bust reroll (1s only). Only shown for
+ * normal-mode pools that actually came up with a 1.
  */
 function rerollButtons(result) {
-	if (result.mode !== 'normal') return [];
-	const row = new ActionRowBuilder();
-	if (result.ones > 0) {
-		row.addComponents(
-			new ButtonBuilder()
-				.setCustomId(`rhune:rr:ones:${encodeRolls(result.kept)}`)
-				.setLabel('↻ Reroll the 1s')
-				.setStyle(ButtonStyle.Primary),
-		);
-	}
-	row.addComponents(
+	if (result.mode !== 'normal' || !(result.ones > 0)) return [];
+	const row = new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
-			.setCustomId(`rhune:rr:all:${result.count}:${result.mode}`)
-			.setLabel('↻ Reroll all')
-			.setStyle(ButtonStyle.Secondary),
+			.setCustomId(`rhune:rr:ones:${encodeRolls(result.kept)}`)
+			.setLabel('↻ Reroll the 1s')
+			.setStyle(ButtonStyle.Primary),
 	);
 	return [row];
 }

@@ -529,7 +529,7 @@ function buildWizardStep(interaction, step) {
 			const die = pb.creationRules?.die || 'd6';
 			const hp = pb.creationRules?.maxHP || '?';
 			const url = siteLinks.playbookUrl(key);
-			const flavor = truncate(pb.tagline, 60);
+			const flavor = truncate(pb.tagline, 150);
 			embed.addFields({
 				name: pb.name,
 				value: `\`Damage ${die}  ·  Max HP ${hp}\`\n*${flavor}*` +
@@ -797,13 +797,15 @@ function buildWizardStep(interaction, step) {
 			remainingText += `\n\n_(${overflow} more moves available — browse with \`/moves\` after creation.)_`;
 		}
 
-		// Every available move as a link (+ trigger) so players can read up
-		// before picking. Names are the links; the dropdown lists names only.
+		// Every available move as a link (+ a short trigger preview) so players can
+		// read up before picking. Names are the links; the dropdown lists names only.
+		// Previews are hard-truncated to a uniform length so the list stays scannable.
+		const PREVIEW_CHARS = 90;
 		let availableList = '';
 		if (availableSlice.length && step.maxPicks > 0) {
 			availableList = '\n\n**Available moves:**\n' + availableSlice.map(m => {
 			const t = triggerFor(m.name);
-			return t ? `• ${link(m.name)} — ${t}` : `• ${link(m.name)}`;
+			return t ? `• ${link(m.name)} — ${truncate(t, PREVIEW_CHARS)}` : `• ${link(m.name)}`;
 		}).join('\n');
 		}
 
@@ -904,7 +906,7 @@ function buildWizardStep(interaction, step) {
 			.setTitle('Special Possessions')
 			.setDescription(
 				`${alwaysText}**Pick ${pickCount} special possession${pickCount === 1 ? '' : 's'} from below.**\n` +
-				`${remaining <= 0 ? 'Ready! Press Continue when done.' : `${remaining} more to pick.`}`,
+				`${remaining <= 0 ? 'Ready! Press **Review Character** when done.' : `${remaining} more to pick.`}`,
 			);
 
 		// Max 5 buttons per row, 5 rows = 25 options max

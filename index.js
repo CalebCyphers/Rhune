@@ -357,14 +357,6 @@ client.on(Events.InteractionCreate, async interaction => {
 					await rollCommand.executePoolRoll(interaction, { keptRolls: newKept });
 					return;
 				}
-
-				if (kind === 'all') {
-					// Fresh roll of the same pool size/mode.
-					const count = Number.parseInt(parts[3], 10);
-					const mode = parts[4] || 'normal';
-					await rollCommand.executePoolRoll(interaction, { count, mode });
-					return;
-				}
 			}
 			catch (err) {
 				console.error('Reroll error:', err);
