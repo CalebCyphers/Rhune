@@ -2,7 +2,7 @@ const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, 
 
 const { rollPool, poolFromRolls, rollExpr, rollCommunity } = require('../lib/dice');
 const { exprResultEmbed, poolEmbed, communityEmbed, withRollId } = require('../lib/format');
-const { getLastRoll, logRoll } = require('../lib/rolllog_pb');
+const { logRoll } = require('../lib/rolllog_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
 const { renderD6Strip, renderDiceStrip } = require('../lib/pool_strip');
 
@@ -323,33 +323,10 @@ async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls 
 module.exports = {
 	data: new SlashCommandBuilder()
 		.setName('roll')
-		.setDescription('Open the roll builder — dice, advantage/disadvantage, then roll')
-		.addBooleanOption(option => option
-			.setName('last')
-			.setDescription('Show your most recent roll')
-			.setRequired(false)),
+		.setDescription('Open the roll builder — dice, advantage/disadvantage, then roll'),
 	async execute(interaction) {
-		const showLast = interaction.options.getBoolean('last') || false;
-
-		const { guildId, userId } = interaction;
-
 		try {
-			if (showLast) {
-				const last = await getLastRoll({ guildId, userId });
-				if (!last) {
-					await interaction.reply({ content: 'No previous rolls found for you in this server yet.', ephemeral: true });
-					return;
-				}
-				const r = last.result;
-				const embed = r?.type === 'pool' ? poolEmbed(r)
-					: r?.type === 'community' ? communityEmbed(r)
-						: exprResultEmbed(r);
-				const components = r?.type === 'pool' ? rerollButtons(r) : [];
-				await interaction.reply(await buildReply(embed, r, last.id, components));
-				return;
-			}
-
-			// Default: open the roll builder.
+			// Open the roll builder.
 			const { embed, components } = buildRollBuilder();
 			await interaction.reply({ embeds: [embed], components, ephemeral: true });
 		}
