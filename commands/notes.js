@@ -5,6 +5,11 @@ const { getNotesText, upsertNotes } = require('../lib/notes_state_pb');
 const { buildNotesView, NOTES_INPUT_LIMIT } = require('../lib/notes_view');
 const { replyEphemeral, requireGuild } = require('../lib/interaction_helpers');
 
+// NOTE: a slash command may NOT mix top-level options with subcommands —
+// Discord rejects that with "Invalid Form Body". So /notes is flat:
+//   /notes                 -> view notes (with an Edit-notes button)
+//   /notes text:<...>      -> set notes
+//   /notes target:<id>     -> pick a non-active character
 async function resolveCharRecord(interaction) {
 	const target = interaction.options.getString('target');
 	if (target) {
@@ -20,23 +25,15 @@ module.exports = {
 		.setName('notes')
 		.setDescription('View or edit your character\'s freeform notes')
 		.addStringOption(opt => opt
+			.setName('text')
+			.setDescription('New notes text (omit to just view your notes)')
+			.setRequired(false))
+		.addStringOption(opt => opt
 			.setName('target')
 			.setDescription('Character record id (defaults to your active character)')
-			.setRequired(false))
-		.addSubcommand(sub => sub
-			.setName('view')
-			.setDescription('Show your character\'s notes'))
-		.addSubcommand(sub => sub
-			.setName('set')
-			.setDescription('Set your character\'s notes (plain text)')
-			.addStringOption(opt => opt
-				.setName('text')
-				.setDescription('Your notes text')
-				.setRequired(true))),
+			.setRequired(false)),
 
 	async execute(interaction) {
-		const sub = interaction.options.getSubcommand();
-
 		try {
 			requireGuild(interaction);
 
@@ -50,8 +47,9 @@ module.exports = {
 				return;
 			}
 
-			if (sub === 'set') {
-				const text = String(interaction.options.getString('text') ?? '').trim();
+			const provided = interaction.options.getString('text');
+			if (provided !== null) {
+				const text = String(provided).trim();
 				if (text.length > NOTES_INPUT_LIMIT) {
 					await replyEphemeral(interaction, `That's too long (${text.length} characters). Please keep notes under ${NOTES_INPUT_LIMIT} characters.`);
 					return;
@@ -69,7 +67,7 @@ module.exports = {
 				return;
 			}
 
-			// Default: view (also shows the modal-based editor for convenience).
+			// No text given: view (the view carries the Edit-notes modal button).
 			const text = await getNotesText({ characterId: record.id, guildId: interaction.guildId });
 			const { embeds, components } = buildNotesView(record, text);
 			await interaction.reply({ embeds, components, ephemeral: true });
