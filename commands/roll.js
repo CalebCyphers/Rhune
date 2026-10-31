@@ -87,11 +87,12 @@ function decodeRolls(s) {
 }
 
 /**
- * Reroll button for a pool roll: the bust reroll (1s only). Only shown for
- * normal-mode pools that actually came up with a 1.
+ * Reroll button for a pool roll: the bust reroll (1s only). Shown whenever a
+ * kept die came up 1 — including advantage/disadvantage pools (the dropped die
+ * doesn't count, and `ones` is already computed on the kept dice).
  */
 function rerollButtons(result) {
-	if (result.mode !== 'normal' || !(result.ones > 0)) return [];
+	if (!(result.ones > 0)) return [];
 	const row = new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
 			.setCustomId(`rhune:rr:ones:${encodeRolls(result.kept)}`)
