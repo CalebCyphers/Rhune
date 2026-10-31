@@ -92,7 +92,7 @@ function rerollButtons(result) {
 // or disadvantage, then hit Roll. Results post to the channel; a pool that
 // comes up with 1s offers a one-tap "reroll the 1s".
 
-const BUILDER_DICE = [4, 6, 8, 10, 12, 20, 100];
+const BUILDER_DICE = [4, 6, 8, 10, 12];
 const BUILDER_MAX = 20;
 
 /** Encode builder state into a customId-safe token. */
@@ -126,9 +126,9 @@ function buildRollBuilder(state = { sides: 6, count: 1, mode: 'normal' }) {
 		.setTitle('🎲 Roll')
 		.setDescription(`Pick your dice, then hit **Roll**.\n\n${preview}`);
 
-	// Die-type buttons (first row).
+	// Die-type buttons (all dice in the first row).
 	const dieRow1 = new ActionRowBuilder();
-	for (const d of BUILDER_DICE.slice(0, 5)) {
+	for (const d of BUILDER_DICE) {
 		dieRow1.addComponents(
 			new ButtonBuilder()
 				.setCustomId(`rhune:rb:die:${encodeBuilder({ sides: d, count, mode })}`)
@@ -137,16 +137,8 @@ function buildRollBuilder(state = { sides: 6, count: 1, mode: 'normal' }) {
 		);
 	}
 
-	// Second row: remaining die types + count controls.
+	// Second row: count controls.
 	const dieRow2 = new ActionRowBuilder();
-	for (const d of BUILDER_DICE.slice(5)) {
-		dieRow2.addComponents(
-			new ButtonBuilder()
-				.setCustomId(`rhune:rb:die:${encodeBuilder({ sides: d, count, mode })}`)
-				.setLabel(`d${d}`)
-				.setStyle(d === sides ? ButtonStyle.Primary : ButtonStyle.Secondary),
-		);
-	}
 	dieRow2.addComponents(
 		new ButtonBuilder()
 			.setCustomId(`rhune:rb:count:${encodeBuilder({ sides, count: Math.max(1, count - 1), mode })}`)
