@@ -545,13 +545,12 @@ ${link}` : ''),
 			.setDescription('Each background shapes your character\'s past and grants different moves. Read about your options below, then choose one.');
 
 		step.backgrounds.forEach(bg => {
-			const grantLine = bg.grants.length > 0 ? `\n*(Grants: ${bg.grants.join(', ')})*` : '';
+			const grantLine = bg.grants.length > 0 ? `*(Grants: ${bg.grants.join(', ')})*` : '';
 			const url = siteLinks.backgroundUrl(step.playbookKey, bg.name);
-			const link = url ? `
-[Read the full background →](${url})` : '';
+			const link = url ? `[Read the full background →](${url})` : '';
 			embed.addFields({
 				name: bg.name.substring(0, 256),
-				value: (bg.text + grantLine + link).substring(0, 1024),
+				value: ([grantLine, link].filter(Boolean).join('\n') || '—').substring(0, 1024),
 			});
 		});
 
@@ -697,14 +696,10 @@ ${link}` : ''),
 	}
 
 	case 'moves_picker': {
-		const allMovesData = step.allMovesData || {};
-
-		// Show auto-granted moves WITH their descriptions
+		// Show auto-granted moves (names only; details live on the rules site).
 		let grantList = '';
 		step.autoGranted.forEach(m => {
-			const md = allMovesData[m];
-			const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
-			grantList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
+			grantList += `• **${m}**\n`;
 		});
 
 		let orStatus = '';
@@ -714,11 +709,9 @@ ${link}` : ''),
 				const pkg = chosen ? group.options.find(o => o.name === chosen) : null;
 				orStatus += `\n\n**${group.label}:**`;
 				if (chosen && pkg) {
-					// Show each granted move with its description
+					// Show each granted move (names only).
 					pkg.grants.forEach(m => {
-						const md = allMovesData[m];
-						const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
-						orStatus += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
+						orStatus += `\n  ✓ **${m}**`;
 					});
 				}
 				else {
@@ -734,9 +727,7 @@ ${link}` : ''),
 		let chosenMovesList = '';
 		if (step.currentPicks > 0) {
 			step.chosenMoves.forEach(m => {
-				const md = allMovesData[m];
-				const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
-				chosenMovesList += `\n  ✓ **${m}**${desc ? ` — ${desc}` : ''}`;
+				chosenMovesList += `\n  ✓ **${m}**`;
 			});
 		}
 		let remainingText = chosenMovesList ? `**Selected moves:**${chosenMovesList}` : '';
@@ -808,8 +799,7 @@ ${link}` : ''),
 				const isChosen = step.chosenMoves.includes(m.name);
 				const opt = new StringSelectMenuOptionBuilder()
 					.setLabel(isChosen ? `✓ ${m.name}` : m.name)
-					.setValue(m.name)
-					.setDescription((m.text || '').replace(/\n---.*$/s, '').substring(0, 100));
+					.setValue(m.name);
 				if (isChosen) {
 					opt.setDefault(true);
 				}
@@ -903,12 +893,10 @@ ${link}` : ''),
 	}
 
 	case 'confirm': {
-		const allMovesData = step.allMovesData || {};
 		let allMovesList = '';
 		step.allMoves.forEach(m => {
-			const md = allMovesData[m];
-			const desc = md && md.text ? md.text.split('\n---')[0].substring(0, 200) : '';
-			allMovesList += `• **${m}**${desc ? ` — ${desc}` : ''}\n`;
+			const url = siteLinks.moveUrl(m, step.playbookKey);
+			allMovesList += url ? `• **[${m}](${url})**\n` : `• **${m}** — *not on the site yet*\n`;
 		});
 
 		const traitsLine = (step.traits || []).length

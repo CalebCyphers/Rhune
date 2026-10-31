@@ -74,6 +74,7 @@ const { upsertInventoryState, getInventoryState } = require('./lib/inventory_sta
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { buildSheetButtons } = require('./lib/sheet_buttons');
+const siteLinks = require('./lib/site_links');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, browseSpecies, toggleTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
 const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
@@ -966,19 +967,19 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				const chunks = splitIntoChunks(moveData.text || '');
-				const embeds = chunks.map((chunk, i) => {
-					const e = new EmbedBuilder()
-						.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
-						.setDescription(chunk);
-					tagPagination(e, `${getCategoryLabel(category)} — ${moveName}`, i, chunks.length);
-					return e;
-				});
+				const moveUrl = siteLinks.moveUrl(moveName, null);
+				const embed = new EmbedBuilder()
+					.setTitle(`${getCategoryLabel(category)} — ${moveName}`)
+					.setDescription(
+						moveUrl
+							? `[Read **${moveName}** on the rules site ↗](${moveUrl})`
+							: '*Not on the site yet.*',
+					);
 
 				const pickerRow = buildMovePicker(category);
 				const navRow = buildMoveNav();
 
-				await interaction.update({ embeds, components: [pickerRow, navRow].filter(Boolean), flags: 64 });
+				await interaction.update({ embeds: [embed], components: [pickerRow, navRow].filter(Boolean), flags: 64 });
 				return;
 			}
 		}
