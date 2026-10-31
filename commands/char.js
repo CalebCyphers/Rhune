@@ -18,6 +18,7 @@ const siteLinks = require('../lib/site_links');
 const { startWizard, getStepInfo, selectPlaybook } = require('../lib/create_wizard');
 const { addCondition, removeCondition } = require('../lib/conditions_pb');
 const { resolveCharacterTarget } = require('../lib/resolve_target');
+const { balanceEmphasis, cutMarkdown } = require('../lib/format');
 const { disambiguationMessage } = require('../lib/disambiguation');
 const { setPending } = require('../lib/pending_actions');
 const { isGuildOwner } = require('../lib/gm');
@@ -498,7 +499,7 @@ const PLAYBOOK_ORDER = ['Blessed', 'Fox', 'Heavy', 'Judge', 'Lightbearer', 'Mars
 /** Collapse whitespace and truncate to n chars, adding an ellipsis if cut. */
 function truncate(text, n) {
 	const t = String(text || '').replace(/\s+/g, ' ').trim();
-	return t.length > n ? `${t.slice(0, n).trimEnd()}…` : t;
+	return t.length > n ? balanceEmphasis(`${t.slice(0, n).trimEnd()}…`) : t;
 }
 
 /** First n sentences of a block, with an ellipsis if there's more (or it's long). */
@@ -506,7 +507,7 @@ function firstSentences(text, n, cap = 220) {
 	const t = String(text || '').replace(/\s+/g, ' ').trim();
 	const parts = t.match(/[^.!?]+[.!?]+/g) || [t];
 	let out = parts.slice(0, n).join(' ').trim();
-	if (parts.length > n || out.length > cap) out = `${out.slice(0, cap).trimEnd()}…`;
+	if (parts.length > n || out.length > cap) out = balanceEmphasis(`${out.slice(0, cap).trimEnd()}…`);
 	return out;
 }
 
@@ -564,7 +565,7 @@ function buildWizardStep(interaction, step) {
 			const link = url ? `[Read more ↗](${url})` : '';
 			embed.addFields({
 				name: bg.name.substring(0, 256),
-				value: ([summary, grantLine, link].filter(Boolean).join('\n') || '—').substring(0, 1024),
+				value: cutMarkdown(([summary, grantLine, link].filter(Boolean).join('\n') || '—'), 1024),
 			});
 		});
 
@@ -660,7 +661,7 @@ function buildWizardStep(interaction, step) {
 
 		const embed = new EmbedBuilder()
 			.setTitle('Pick Your Traits')
-			.setDescription(desc.slice(0, 4096));
+			.setDescription(cutMarkdown(desc, 4096));
 
 		const rows = [];
 
@@ -813,7 +814,7 @@ function buildWizardStep(interaction, step) {
 
 		const embed = new EmbedBuilder()
 			.setTitle('Choose Your Starting Moves')
-			.setDescription(embedDesc.slice(0, 4096));
+			.setDescription(cutMarkdown(embedDesc, 4096));
 
 		const rows = [];
 
