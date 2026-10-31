@@ -70,7 +70,8 @@ const {
 
 const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
-const { upsertInventoryState, getInventoryState } = require('./lib/inventory_state_pb');
+const { getNotesText, upsertNotes } = require('./lib/notes_state_pb');
+const { buildNotesView, buildNotesModal, NOTES_MODAL_INPUT_ID, NOTES_INPUT_LIMIT } = require('./lib/notes_view');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { buildSheetButtons } = require('./lib/sheet_buttons');
@@ -225,77 +226,47 @@ client.once(Events.ClientReady, async () => {
 	console.log(`Bot status set to ${statusType}`);
 });
 
-client.on(Events.MessageCreate, async message => {
-	try {
-		if (!message || message.author?.bot) return;
-		if (!message.guildId) return;
-
-		// Only handle replies.
-		const refId = message.reference?.messageId;
-		if (!refId) return;
-
-		const pending = getPending(message.author.id);
-		if (!pending || pending.action !== 'outfit_save') return;
-
-		// Expired.
-		if (pending.expiresAt && Date.now() > pending.expiresAt) {
-			clearPending(message.author.id);
-			await message.reply('That outfit prompt has expired. Please run `/outfit` again to get a fresh template, then reply to it with your updated inventory note.');
-			return;
-		}
-
-		// Must match the template message id and channel/guild.
-		if (pending.guildId !== message.guildId) return;
-		if (pending.channelId && pending.channelId !== message.channelId) return;
-		if (pending.templateMessageId !== refId) return;
-
-		const content = String(message.content || '').trim();
-		if (!content.length) {
-			await message.reply('Nothing to save. Please reply with your inventory note text.');
-			return;
-		}
-
-		// Discord hard limit is 2000 chars; be a little conservative.
-		if (content.length > 2000) {
-			await message.reply(`That message is too long to save (${content.length} characters). Please shorten it to 2000 characters or fewer, then reply again.`);
-			return;
-		}
-
-		await upsertInventoryState({
-			characterId: pending.characterId,
-			guildId: message.guildId,
-			inventoryText: content,
-			updatedByUserId: message.author.id,
-		});
-
-		clearPending(message.author.id);
-
-		// Clean up the bot's own template message so a chain of inventory
-		// messages isn't left behind in the channel. Best-effort: never block
-		// the actual save if deletion fails (e.g. missing permission).
-		try {
-			const templateMsg = await message.channel?.messages.fetch(pending.templateMessageId);
-			if (templateMsg) await templateMsg.delete();
-		}
-		catch {
-			// Ignore — save already succeeded; just leave the template in place.
-		}
-
-		// Confirmation: regular message reply (ephemeral not possible outside interactions).
-		await message.reply('Saved your inventory note. Check it with `/inv check`. To edit, run `/outfit` again and reply with your updated note.');
-	}
-	catch (err) {
-		// Best-effort: avoid crashing the message handler.
-		try {
-			await message.reply(`Error saving inventory note: ${err.message}`);
-		}
-		catch {
-			// ignore
-		}
-	}
-});
+// (The old /outfit reply-to-save message handler is retired — notes are now
+// edited through a modal from the sheet's Notes button or /notes.)
 
 client.on(Events.InteractionCreate, async interaction => {
+	// === Notes edit modal: rhune:notes:edit:<charId> ===
+	if (interaction.isModalSubmit() && interaction.customId.startsWith('rhune:notes:edit:')) {
+		try {
+			const charId = interaction.customId.slice('rhune:notes:edit:'.length);
+			const record = await getCharacterById({ id: charId });
+
+			if (!record || record.guild_id !== interaction.guildId) {
+				await replyEphemeral(interaction, 'That character is not from this server.');
+				return;
+			}
+			if (record.owner_user_id !== interaction.user.id) {
+				await replyEphemeral(interaction, 'You do not own that character.');
+				return;
+			}
+
+			const text = String(interaction.fields.getTextInputValue(NOTES_MODAL_INPUT_ID) ?? '').trim();
+			if (text.length > NOTES_INPUT_LIMIT) {
+				await replyEphemeral(interaction, `That's too long (${text.length} characters). Please keep notes under ${NOTES_INPUT_LIMIT} characters.`);
+				return;
+			}
+
+			await upsertNotes({
+				characterId: record.id,
+				guildId: interaction.guildId,
+				text,
+				updatedByUserId: interaction.user.id,
+			});
+
+			const { embeds, components } = buildNotesView(record, text);
+			await interaction.reply({ embeds, components, ephemeral: true });
+		}
+		catch (err) {
+			handleError(interaction, err);
+		}
+		return;
+	}
+
 	if (interaction.isButton()) {
 		// === Roll builder buttons: rhune:rb:* ===
 		if (interaction.customId.startsWith('rhune:rb:')) {
@@ -434,10 +405,10 @@ client.on(Events.InteractionCreate, async interaction => {
 		}
 
 
-		// Inventory button: rhune:inventory:<charId>
-		if (interaction.customId.startsWith('rhune:inventory:')) {
+		// Notes button: rhune:notes:<charId> — show freeform notes.
+		if (interaction.customId.startsWith('rhune:notes:')) {
 			try {
-				const charId = interaction.customId.slice('rhune:inventory:'.length);
+				const charId = interaction.customId.slice('rhune:notes:'.length);
 				const record = await getCharacterById({ id: charId });
 
 				if (record.guild_id !== interaction.guildId) {
@@ -449,18 +420,33 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				const state = await getInventoryState({ characterId: record.id, guildId: interaction.guildId });
-				const text = state?.inventory_text ? String(state.inventory_text) : null;
-				if (!text) {
-					await replyEphemeral(interaction, `No saved inventory note for **${record.name}** yet. Use /outfit to create one.`);
+				const text = await getNotesText({ characterId: record.id, guildId: interaction.guildId });
+				const { embeds, components } = buildNotesView(record, text);
+				await interaction.reply({ embeds, components, ephemeral: true });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Edit-notes button: rhune:notesedit:<charId> — open the notes modal.
+		if (interaction.customId.startsWith('rhune:notesedit:')) {
+			try {
+				const charId = interaction.customId.slice('rhune:notesedit:'.length);
+				const record = await getCharacterById({ id: charId });
+
+				if (record.guild_id !== interaction.guildId) {
+					await replyEphemeral(interaction, 'That character is not from this server.');
 					return;
 				}
-				if (text.length > 1900) {
-					await replyEphemeral(interaction, `Your saved inventory note for **${record.name}** is too long to display here. Shorten it via /outfit.`);
+				if (record.owner_user_id !== interaction.user.id) {
+					await replyEphemeral(interaction, 'You do not own that character.');
 					return;
 				}
 
-				await replyEphemeral(interaction, `**${record.name} — Inventory**\n\n${text}\n\nEdit: run /outfit again and reply with your updated note.`);
+				const text = await getNotesText({ characterId: record.id, guildId: interaction.guildId });
+				await interaction.showModal(buildNotesModal(record.id, text));
 			}
 			catch (err) {
 				handleError(interaction, err);
