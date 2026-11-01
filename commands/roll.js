@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 
 const { rollPool, poolFromRolls, rollExpr, rollCommunity } = require('../lib/dice');
-const { exprResultEmbed, poolEmbed, communityEmbed, withRollId } = require('../lib/format');
+const { exprResultEmbed, poolEmbed, communityEmbed } = require('../lib/format');
 const { logRoll } = require('../lib/rolllog_pb');
 const { diceImagePath, diceImageName } = require('../lib/dice_images');
 const { renderD6Strip, renderDiceStrip } = require('../lib/pool_strip');
@@ -69,9 +69,9 @@ async function buildDiceAttachments(result, embed) {
 	return files;
 }
 
-async function buildReply(embed, result, rollId, components = []) {
+async function buildReply(embed, result, components = []) {
 	const files = await buildDiceAttachments(result, embed);
-	const payload = { embeds: [withRollId(embed, rollId)], files };
+	const payload = { embeds: [embed], files };
 	if (components.length) payload.components = components;
 	return payload;
 }
@@ -216,7 +216,7 @@ async function postRollResult(interaction, { result, embed, components, expr, mo
 	// Ack the button within Discord's 3s window before the PocketBase write.
 	await deferComponentUpdate(interaction);
 
-	const rollId = await logRoll({
+	await logRoll({
 		guildId: interaction.guildId,
 		channelId: interaction.channelId,
 		userId: interaction.user.id,
@@ -226,7 +226,7 @@ async function postRollResult(interaction, { result, embed, components, expr, mo
 		result,
 	});
 
-	const payload = await buildReply(embed, result, rollId, components);
+	const payload = await buildReply(embed, result, components);
 
 	if (interaction.guildId) {
 		const channel = interaction.channel
@@ -299,7 +299,7 @@ async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls 
 		? poolFromRolls(keptRolls, { count: keptRolls.length, mode: 'normal' })
 		: rollPool({ count, mode });
 
-	const rollId = await logRoll({
+	await logRoll({
 		guildId: interaction.guildId,
 		channelId: interaction.channelId,
 		userId: interaction.user.id,
@@ -309,7 +309,7 @@ async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls 
 		result,
 	});
 
-	const payload = await buildReply(poolEmbed(result), result, rollId, rerollButtons(result, interaction.user.id));
+	const payload = await buildReply(poolEmbed(result), result, rerollButtons(result, interaction.user.id));
 
 	if (interaction.guildId) {
 		const channel = interaction.channel
