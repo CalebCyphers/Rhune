@@ -324,8 +324,20 @@ client.on(Events.InteractionCreate, async interaction => {
 				const kind = parts[2];
 
 				if (kind === 'ones') {
+					// parts[3] may carry the roller's id ("<userId>:<rolls>") — only
+					// the original roller may push the button (it's a public post).
+					let payload = parts.slice(3).join(':');
+					const sep = payload.indexOf(':');
+					if (sep !== -1 && /^\d+$/.test(payload.slice(0, sep))) {
+						const ownerId = payload.slice(0, sep);
+						if (ownerId !== interaction.user.id) {
+							await replyEphemeral(interaction, 'That reroll belongs to whoever rolled it.');
+							return;
+						}
+						payload = payload.slice(sep + 1);
+					}
 					// Reroll every die showing a 1 (the bust reroll).
-					const kept = rollCommand.decodeRolls(parts[3]);
+					const kept = rollCommand.decodeRolls(payload);
 					const newKept = rollCommand.rerollOnes(kept);
 					await rollCommand.executePoolRoll(interaction, { keptRolls: newKept });
 					return;

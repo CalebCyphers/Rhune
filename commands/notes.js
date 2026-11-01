@@ -76,10 +76,8 @@ module.exports = {
 			await interaction.editReply({ embeds, components });
 		}
 		catch (err) {
-			const status = err?.status ? ` (status ${err.status})` : '';
-			const detail = err?.data ? `\n${JSON.stringify(err.data)}` : '';
-			const url = err?.url ? `\nurl: ${err.url}` : '';
-			await replyEphemeral(interaction, `Error${status}: ${err.message}${detail}${url}`);
+			console.error(err);
+			await replyEphemeral(interaction, 'Something went wrong on my end — try that again. If it keeps happening, let Kaia know.');
 		}
 	},
 };

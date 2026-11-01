@@ -92,11 +92,14 @@ function decodeRolls(s) {
  * kept die came up 1 — including advantage/disadvantage pools (the dropped die
  * doesn't count, and `ones` is already computed on the kept dice).
  */
-function rerollButtons(result) {
+function rerollButtons(result, userId = null) {
 	if (!(result.ones > 0)) return [];
+	// Encode the roller's id so only they can push the button (it's a public
+	// channel post — anyone could otherwise click it forever).
+	const owner = userId ? `${userId}:` : '';
 	const row = new ActionRowBuilder().addComponents(
 		new ButtonBuilder()
-			.setCustomId(`rhune:rr:ones:${encodeRolls(result.kept)}`)
+			.setCustomId(`rhune:rr:ones:${owner}${encodeRolls(result.kept)}`)
 			.setLabel('↻ Reroll the 1s')
 			.setStyle(ButtonStyle.Primary),
 	);
@@ -265,7 +268,7 @@ async function executeBuilderRoll(interaction, state) {
 		return postRollResult(interaction, {
 			result,
 			embed: poolEmbed(result),
-			components: rerollButtons(result),
+			components: rerollButtons(result, interaction.user.id),
 			expr: `pool:${count}${mode !== 'normal' ? ` ${mode}` : ''}`,
 			mode: result.mode,
 		});
@@ -306,7 +309,7 @@ async function executePoolRoll(interaction, { count, mode = 'normal', keptRolls 
 		result,
 	});
 
-	const payload = await buildReply(poolEmbed(result), result, rollId, rerollButtons(result));
+	const payload = await buildReply(poolEmbed(result), result, rollId, rerollButtons(result, interaction.user.id));
 
 	if (interaction.guildId) {
 		const channel = interaction.channel
@@ -347,11 +350,6 @@ module.exports = {
 	/** Reroll the dice showing 1 (the bust reroll). */
 	rerollOnes(rolls) {
 		return rolls.map(v => (v === 1 ? rollPool({ count: 1 }).kept[0] : v));
-	},
-
-	/** Roll a fresh pool of the given size/mode (used by "reroll all"). */
-	rerollAll(count, mode) {
-		return rollPool({ count, mode });
 	},
 
 	buildRollBuilder,

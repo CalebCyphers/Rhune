@@ -372,6 +372,11 @@ module.exports = {
 				if (loadCurrent !== null) patch.load_current = loadCurrent;
 				if (loadMax !== null) patch.load_max = loadMax;
 
+				if (!Object.keys(patch).length) {
+					await replyEphemeral(interaction, { content: 'Nothing to update — pass at least one option (hp, hp_max, xp, load_current, load_max).', ephemeral: true });
+					return;
+				}
+
 				const updated = await updateCharacter({ id: record.id, patch });
 				const embed = await renderCharacterSheetEmbed(updated);
 				await replyEphemeral(interaction, { content: 'Updated character.', embeds: [embed], ephemeral: true });
@@ -492,11 +497,9 @@ module.exports = {
 			await replyEphemeral(interaction, { content: 'Unknown subcommand.', ephemeral: true });
 		}
 		catch (err) {
-			// PocketBase client throws errors with status/data that are useful for debugging.
-			const status = err?.status ? ` (status ${err.status})` : '';
-			const detail = err?.data ? `\n${JSON.stringify(err.data)}` : '';
-			const url = err?.url ? `\nurl: ${err.url}` : '';
-			await replyEphemeral(interaction, { content: `Error${status}: ${err.message}${detail}${url}`, ephemeral: true });
+			// Log the PocketBase status/data server-side; the user gets something human.
+			console.error(err);
+			await replyEphemeral(interaction, { content: 'Something went wrong on my end — try that again. If it keeps happening, let Kaia know.', ephemeral: true });
 		}
 	},
 
