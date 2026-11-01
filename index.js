@@ -83,14 +83,15 @@ const {
 
 const { parsePickCharCustomId } = require('./lib/disambiguation');
 const { getPending, clearPending } = require('./lib/pending_actions');
-const { getNotesText, upsertNotes } = require('./lib/notes_state_pb');
+const { getNotesText, upsertNotes, deleteNotes } = require('./lib/notes_state_pb');
+const { removeAllConditions } = require('./lib/conditions_pb');
 const { buildNotesView, buildNotesModal, NOTES_MODAL_INPUT_ID, NOTES_INPUT_LIMIT } = require('./lib/notes_view');
 const { getCharacterById } = require('./lib/characters_pb');
 const { renderCharacterSheetEmbed } = require('./lib/character_embed');
 const { buildSheetButtons } = require('./lib/sheet_buttons');
 const { TRAIT_BY_NAME } = require('./lib/traits_data');
 const { getWizard, clearWizard, selectPlaybook, selectBackground, selectInstinct, setTraitPage, setTraitSlot, clearTrait, toggleMove, setOrChoice, togglePossession, getStepInfo, advanceStep, backStep } = require('./lib/create_wizard');
-const { createCharacter, setActiveCharacter, updateCharacter } = require('./lib/characters_pb');
+const { createCharacter, setActiveCharacter, updateCharacter, getActiveCharacterId, deleteCharacter } = require('./lib/characters_pb');
 const { replyEphemeral, updateClearComponents, handleError, deferComponentUpdate, deferEphemeralReply } = require('./lib/interaction_helpers');
 const { lookupPlaybook, renderCharacterMoves } = require('./lib/playbooks');
 const { buildWizardStep } = require('./commands/char');
@@ -260,8 +261,8 @@ client.on(Events.InteractionCreate, async interaction => {
 				return;
 			}
 
-			await updateCharacter({ id: charId, patch: result.patch });
-			const updated = await getCharacterById({ id: charId });
+			// updateCharacter returns the updated record — no re-fetch needed.
+			const updated = await updateCharacter({ id: charId, patch: result.patch });
 			const view = editViews.buildTraitsEditView(updated, 0);
 			await interaction.editReply({ ...view, content: result.message });
 		}
@@ -350,7 +351,8 @@ client.on(Events.InteractionCreate, async interaction => {
 			try {
 				await deferEphemeralReply(interaction);
 				const charId = interaction.customId.slice('rhune:move:sheet:'.length);
-				const record = await getCharacterById({ id: charId });
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
 
 				const browseRow = new ActionRowBuilder().addComponents(
 					new ButtonBuilder()
@@ -513,10 +515,8 @@ client.on(Events.InteractionCreate, async interaction => {
 				const current = typeof record.hp === 'number' ? record.hp : 0;
 				const newHp = Math.max(0, Math.min(record.hp_max ?? current, current + delta));
 
-				await updateCharacter({ id: charId, patch: { hp: newHp } });
-
-				// Re-render the edit view
-				const updated = await getCharacterById({ id: charId });
+				// updateCharacter returns the updated record — no re-fetch needed.
+				const updated = await updateCharacter({ id: charId, patch: { hp: newHp } });
 				const { editEmbed, editComponents } = buildEditView(updated);
 				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
@@ -546,9 +546,8 @@ client.on(Events.InteractionCreate, async interaction => {
 				const current = typeof record.xp === 'number' ? record.xp : 0;
 				const newXp = Math.max(0, current + delta);
 
-				await updateCharacter({ id: charId, patch: { xp: newXp } });
-
-				const updated = await getCharacterById({ id: charId });
+				// updateCharacter returns the updated record — no re-fetch needed.
+				const updated = await updateCharacter({ id: charId, patch: { xp: newXp } });
 				const { editEmbed, editComponents } = buildEditView(updated);
 				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
@@ -586,9 +585,8 @@ client.on(Events.InteractionCreate, async interaction => {
 					debils.push(debilName);
 				}
 
-				await updateCharacter({ id: charId, patch: { debilities: debils } });
-
-				const updated = await getCharacterById({ id: charId });
+				// updateCharacter returns the updated record — no re-fetch needed.
+				const updated = await updateCharacter({ id: charId, patch: { debilities: debils } });
 				const { editEmbed, editComponents } = buildEditView(updated);
 				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
@@ -615,8 +613,8 @@ client.on(Events.InteractionCreate, async interaction => {
 					return;
 				}
 
-				await updateCharacter({ id: charId, patch: result.patch });
-				const updated = await getCharacterById({ id: charId });
+				// updateCharacter returns the updated record — no re-fetch needed.
+				const updated = await updateCharacter({ id: charId, patch: result.patch });
 				const { editEmbed, editComponents } = buildEditView(updated);
 				await interaction.editReply({ embeds: [editEmbed], components: editComponents });
 			}
@@ -721,15 +719,54 @@ client.on(Events.InteractionCreate, async interaction => {
 			return;
 		}
 
+		// Confirm character deletion: rhune:confirmdelete:<charId>
+		if (interaction.customId.startsWith('rhune:confirmdelete:')) {
+			try {
+				await deferComponentUpdate(interaction);
+				const charId = interaction.customId.slice('rhune:confirmdelete:'.length);
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
+
+				// Cascade: the character's notes + conditions go with them (roll
+				// logs are keyed by user, not character, so they're unaffected).
+				// Clear the active mapping first if this was the active character.
+				const activeId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
+				if (activeId === record.id) {
+					await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: null });
+				}
+				await Promise.all([
+					deleteNotes({ characterId: record.id }),
+					removeAllConditions({ characterId: record.id }),
+				]);
+				await deleteCharacter({ id: record.id });
+
+				await interaction.editReply({ content: `Deleted character **${record.name}**.`, embeds: [], components: [] });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
+		// Cancel character deletion: rhune:canceldelete:<charId>
+		if (interaction.customId.startsWith('rhune:canceldelete:')) {
+			try {
+				await interaction.update({ content: 'Deletion cancelled — nothing was deleted.', embeds: [], components: [] });
+			}
+			catch (err) {
+				handleError(interaction, err);
+			}
+			return;
+		}
+
 		// Edit done: rhune:editdone:<charId>
 		if (interaction.customId.startsWith('rhune:editdone:')) {
 			try {
 				await deferComponentUpdate(interaction);
 				const charId = interaction.customId.slice('rhune:editdone:'.length);
-				const record = await getCharacterById({ id: charId });
+				const record = await loadOwnedCharacter(interaction, charId);
+				if (!record) return;
 				const embed = await renderCharacterSheetEmbed(record);
-
-
 				const row = buildSheetButtons(record);
 
 				await interaction.editReply({ embeds: [embed], components: [row] });
@@ -950,14 +987,16 @@ client.on(Events.InteractionCreate, async interaction => {
 			else if (kind === 'editmovedel') result = editOps.removeMove(record, value);
 			else return;
 
+			let updated;
 			if (result.error) {
 				await interaction.followUp({ content: result.error, ephemeral: true });
+				updated = await getCharacterById({ id: charId });
 			}
 			else {
-				await updateCharacter({ id: charId, patch: result.patch });
+				// updateCharacter returns the updated record — no re-fetch needed.
+				updated = await updateCharacter({ id: charId, patch: result.patch });
 			}
 
-			const updated = await getCharacterById({ id: charId });
 			const view = (kind === 'edittraitadd' || kind === 'edittraitdel')
 				? editViews.buildTraitsEditView(updated, page)
 				: editViews.buildMovesEditView(updated, page);

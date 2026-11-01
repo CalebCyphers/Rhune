@@ -180,7 +180,7 @@ test('char active: ok target but owner mismatch -> blocked', async () => {
 	finally { restoreAll(); }
 });
 
-test('char delete: if deleting active, clears mapping first', async () => {
+test('char delete: asks for confirmation, does not delete yet', async () => {
 	const stubs = makeStubs({
 		resolveCharacterTarget: () => ({ kind: 'ok', record: { id: 'c1', name: 'A', guild_id: 'guild1', owner_user_id: 'user1' } }),
 		getActiveCharacterId: () => 'c1',
@@ -189,10 +189,14 @@ test('char delete: if deleting active, clears mapping first', async () => {
 	try {
 		const { interaction, calls } = makeInteraction({ subcommand: 'delete', options: { target: 'A' } });
 		await charCmd.execute(interaction);
-		assert.equal(stubs.calls.setActiveCharacter.length, 1);
-		assert.deepEqual(stubs.calls.setActiveCharacter[0], { guildId: 'guild1', userId: 'user1', characterId: null });
-		assert.equal(stubs.calls.deleteCharacter.length, 1);
-		assert.match(responseOf(calls).content, /Deleted character/i);
+		// Two-step confirm: nothing is deleted until the confirm button is clicked.
+		assert.equal(stubs.calls.deleteCharacter.length, 0);
+		assert.equal(stubs.calls.setActiveCharacter.length, 0);
+		const res = responseOf(calls);
+		assert.match(res.content, /Delete \*\*A\*\*\?/i);
+		const ids = (res.components?.[0]?.components ?? []).map(c => c.data?.custom_id ?? c.custom_id);
+		assert.ok(ids.includes('rhune:confirmdelete:c1'));
+		assert.ok(ids.includes('rhune:canceldelete:c1'));
 	}
 	finally { restoreAll(); }
 });

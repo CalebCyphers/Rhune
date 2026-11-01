@@ -7,7 +7,6 @@ const {
 	getActiveCharacterId,
 	updateCharacter,
 	renameCharacter,
-	deleteCharacter,
 } = require('../lib/characters_pb');
 
 const { renderCharacterSheetEmbed } = require('../lib/character_embed');
@@ -215,14 +214,23 @@ module.exports = {
 					return;
 				}
 
-				// If deleting the active character, clear the mapping first.
-				const activeId = await getActiveCharacterId({ guildId: interaction.guildId, userId: interaction.user.id });
-				if (activeId === record.id) {
-					await setActiveCharacter({ guildId: interaction.guildId, userId: interaction.user.id, characterId: null });
-				}
-
-				await deleteCharacter({ id: record.id });
-				await replyEphemeral(interaction, { content: `Deleted character **${record.name}**.`, ephemeral: true });
+				// Two-step confirm — deletion is irreversible (and cascades to the
+				// character's notes + conditions), so never do it on one click.
+				const confirmRow = new ActionRowBuilder().addComponents(
+					new ButtonBuilder()
+						.setCustomId(`rhune:confirmdelete:${record.id}`)
+						.setLabel(`Delete ${record.name}`.slice(0, 80))
+						.setStyle(ButtonStyle.Danger),
+					new ButtonBuilder()
+						.setCustomId(`rhune:canceldelete:${record.id}`)
+						.setLabel('Cancel')
+						.setStyle(ButtonStyle.Secondary),
+				);
+				await replyEphemeral(interaction, {
+					content: `⚠️ Delete **${record.name}**? This is permanent — their notes and conditions go with them.`,
+					components: [confirmRow],
+					ephemeral: true,
+				});
 				return;
 			}
 
