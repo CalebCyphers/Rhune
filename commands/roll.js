@@ -33,8 +33,10 @@ async function buildDiceAttachments(result, embed) {
 	}
 
 	if (result?.type === 'expr') {
-		// Single die: show the face itself as a thumbnail.
-		if (result.count === 1) {
+		// A lone die (no advantage/disadvantage): show the face itself as a
+		// thumbnail. With adv/dis there are two dice — fall through to the strip
+		// so both render and the dropped die is dimmed.
+		if (result.count === 1 && result.rolls.length === 1) {
 			try {
 				const face = result.rolls?.[0];
 				const filePath = diceImagePath({ sides: result.sides, face });
